@@ -1,0 +1,37 @@
+params:  
+  diff_env:
+    name: SNUHumanoidEnv
+    stochastic_env: True
+    episode_length: 1000
+    MM_caching_frequency: 8
+
+  algo:
+    name: adam
+
+  network:
+    actor: ActorStochasticMLP
+    actor_mlp:
+      units: [512, 256]
+      activation: elu
+    actor_logstd_init: -1.0
+
+  config:
+    name: df_humanoid_ac
+    env_name: dflex
+    actor_learning_rate: 2e-3 # adam
+    lr_schedule: linear # ['constant', 'linear']
+    obs_rms: True
+    gamma: 0.99
+    betas: [0.7, 0.95] # adam
+    max_epochs: 2000
+    steps_num: 1000
+    grad_norm: 1.0
+    truncate_grads: True 
+    num_actors: 16
+    save_interval: 200
+
+    player:
+      determenistic: True
+      games_num: 4
+      num_actors: 1
+      print_stats: True

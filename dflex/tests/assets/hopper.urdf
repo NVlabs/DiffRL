@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<robot name="physics">
+
+  <link name="torso">
+    <collision>
+      <geometry>
+          <box size="0.1 0.2 0.1"/>
+      </geometry>
+      <origin xyz="0 0 0"/>
+    </collision>
+  </link>
+
+  <link name="thigh">
+     <collision>
+      <geometry>
+        <box size="0.05 0.25 0.05"/>	
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 -0.125 0.0"/>
+    </collision>
+  </link>
+
+	<link name="femur">
+     <collision>
+      <geometry>
+        <box size="0.05 0.25 0.05"/>	
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 -0.125 0.0"/>
+    </collision>
+  </link>
+
+  <link name="foot">
+     <collision>
+      <geometry>
+        <box size="0.2 0.05 0.2"/>	
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 -0.025"/>
+    </collision>
+  </link>  
+
+  <joint name="torso_thigh" type="continuous">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0.0 -0.1 0"/>
+    <parent link="torso"/>
+    <child link="thigh"/>
+    <limit effort="1000.0" velocity="5"/>
+  </joint>
+
+  <joint name="thigh_femur" type="continuous">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0.0 -0.25 0"/>
+    <parent link="thigh"/>
+    <child link="femur"/>
+    <limit effort="1000.0" velocity="5"/>
+  </joint>
+
+  <joint name="femur_foot" type="continuous">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0.0 -0.25 0"/>
+    <parent link="femur"/>
+    <child link="foot"/>
+    <limit effort="1000.0" velocity="5"/>
+  </joint>    
+  
+</robot>

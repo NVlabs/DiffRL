@@ -1,0 +1,35 @@
+params:  
+  diff_env:
+    name: CartPoleSwingUpEnv
+    stochastic_env: True
+    episode_length: 240
+    MM_caching_frequency: 4
+
+  algo:
+    name: adam
+
+  network:
+    actor: ActorStochasticMLP
+    actor_mlp:
+      units: [64, 64]
+      activation: elu
+    actor_logstd_init: -1.0
+
+  config:
+    name: df_cartpole_swing_up_bptt
+    env_name: dflex
+    actor_learning_rate: 1e-2 # adam with linear schedule
+    lr_schedule: linear # ['constant', 'linear']
+    betas: [0.7, 0.95] # adam
+    max_epochs: 500
+    steps_num: 240
+    grad_norm: 1.0
+    truncate_grads: True
+    num_actors: 64
+
+    player:
+      # render: True
+      determenistic: True
+      games_num: 12
+      num_actors: 4
+      print_stats: True

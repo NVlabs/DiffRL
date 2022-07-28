@@ -1,0 +1,44 @@
+params:  
+  diff_env:
+    name: CheetahEnv
+    stochastic_env: True
+    episode_length: 1000
+    MM_caching_frequency: 16
+    
+  network:
+    actor: ActorStochasticMLP # ActorDeterministicMLP
+    actor_mlp:
+      units: [128, 64, 32]
+      activation: elu
+
+    critic: CriticMLP
+    critic_mlp:
+      units: [64, 64] 
+      activation: elu
+
+  config:
+    name: df_cheetah_shac
+    actor_learning_rate: 2e-3 # adam
+    critic_learning_rate: 2e-3 # adam
+    lr_schedule: linear # ['constant', 'linear']
+    target_critic_alpha: 0.2
+    obs_rms: True
+    ret_rms: False
+    critic_iterations: 16
+    critic_method: td-lambda # ['td-lambda', 'one-step']
+    lambda: 0.95
+    num_batch: 4
+    gamma: 0.99
+    betas: [0.7, 0.95] # adam
+    max_epochs: 2000
+    steps_num: 32
+    grad_norm: 1.0 
+    truncate_grads: True
+    num_actors: 64
+    save_interval: 400
+
+    player:
+      determenistic: True
+      games_num: 1
+      num_actors: 1
+      print_stats: True

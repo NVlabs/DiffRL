@@ -1,0 +1,44 @@
+params:  
+  diff_env:
+    name: CartPoleSwingUpEnv
+    stochastic_env: True
+    episode_length: 240
+    MM_caching_frequency: 4
+
+  network:
+    actor: ActorStochasticMLP #ActorDeterministicMLP
+    actor_mlp:
+      units: [64, 64]
+      activation: elu
+
+    critic: CriticMLP
+    critic_mlp:
+      units: [64, 64]
+      activation: elu
+
+  config:
+    name: df_cartpole_swing_up_shac
+    actor_learning_rate: 1e-2 # adam
+    critic_learning_rate: 1e-3 # adam
+    lr_schedule: linear # ['constant', 'linear']
+    target_critic_alpha: 0.2
+    obs_rms: True
+    ret_rms: False
+    critic_iterations: 16
+    critic_method: td-lambda # ['td-lambda', 'one-step']
+    lambda: 0.95
+    num_batch: 4
+    gamma: 0.99
+    betas: [0.7, 0.95] # adam
+    max_epochs: 500
+    steps_num: 32
+    grad_norm: 1.0
+    truncate_grads: True
+    num_actors: 64
+    save_interval: 100
+
+    player:
+      determenistic: True
+      games_num: 4
+      num_actors: 4
+      print_stats: True
