@@ -42,6 +42,11 @@ In this paper, we present a GPU-based differentiable simulation and propose a po
   pip install -e .
   ````
 
+- Install an older version of protobuf required for TensorboardX:
+  ````
+  pip install protobuf==3.20.0
+  ````
+
 #### Test Examples
 
 A test example can be found in the `examples` folder.
@@ -64,7 +69,7 @@ We also provide a one-line script in the `examples/train_script.sh` folder to re
 
 #### SHAC (Our Method)
 
-For example, running the following commands in `examples` folder allows to train Ant and SNU Humanoid environments with SHAC respectively for 5 individual seeds.
+For example, running the following commands in `examples` folder allows to train Ant and SNU Humanoid (Humanoid MTU in the paper) environments with SHAC respectively for 5 individual seeds.
 
 ```
 python train_script.py --env Ant --algo shac --num-seeds 5

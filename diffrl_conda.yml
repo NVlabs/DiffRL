@@ -1,4 +1,4 @@
-name: shac38
+name: shac
 channels:
   - pytorch
   - defaults
