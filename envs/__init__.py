@@ -6,9 +6,12 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 from envs.dflex_env import DFlexEnv
+from envs.warp_env import WarpEnv
+from envs.claw_env import ClawWarpEnv
 from envs.ant import AntEnv
 from envs.cheetah import CheetahEnv
 from envs.hopper import HopperEnv
 from envs.snu_humanoid import SNUHumanoidEnv
 from envs.cartpole_swing_up import CartPoleSwingUpEnv
+from envs.cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
 from envs.humanoid import HumanoidEnv
