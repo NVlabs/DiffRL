@@ -32,6 +32,7 @@ class WarpEnv:
         # initialize observation and action space
         self.num_observations = num_obs
         self.num_actions = num_act
+        self.episode_length = episode_length
 
         self.obs_space = spaces.Box(
             np.ones(self.num_observations) * -np.Inf,
@@ -90,12 +91,16 @@ class WarpEnv:
     def num_obs(self):
         return self.num_observations
 
-    def get_state(self):
+    def get_state(self, return_act=False):
         """Returns model joint state (position and velocity)"""
-        return (
-            wp.to_torch(self.model.joint_q).clone().view(self.num_envs, -1),
-            wp.to_torch(self.model.joint_qd).clone().view(self.num_envs, -1),
+        joint_q, joint_qd = (
+            wp.to_torch(self.model.joint_q).view(self.num_envs, -1),
+            wp.to_torch(self.model.joint_qd).view(self.num_envs, -1),
         )
+        if not return_act:
+            return joint_q, joint_qd
+        joint_act = wp.to_torch(self.model.joint_act).view(self.num_envs, -1)
+        return joint_q, joint_qd, joint_act
 
     def reset_with_state(
         self, init_joint_q, init_joint_qd, env_ids=None, force_reset=True
