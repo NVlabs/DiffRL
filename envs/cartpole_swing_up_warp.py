@@ -27,140 +27,7 @@ except ModuleNotFoundError:
     print("No pxr package")
 
 from utils import torch_utils as tu
-
-
-@wp.kernel
-def assign_kernel(
-    b: wp.array(dtype=float),
-    # outputs
-    a: wp.array(dtype=float),
-):
-    tid = wp.tid()
-    a[tid] = b[tid]
-
-
-def float_assign(a, b):
-    wp.launch(
-        assign_kernel,
-        dim=len(b),
-        device=b.device,
-        inputs=[b],
-        outputs=[a],
-    )
-    return a
-
-
-@wp.kernel
-def assign_kernel_2d(
-    b: wp.array2d(dtype=float),
-    # outputs
-    a: wp.array(dtype=float),
-):
-    tid = wp.tid()
-    a[2 * tid] = b[tid, 0]
-    a[2 * tid + 1] = b[tid, 1]
-
-
-def float_assign_2d(a, b):
-    wp.launch(
-        assign_kernel_2d,
-        dim=len(b),
-        device=b.device,
-        inputs=[b],
-        outputs=[a],
-    )
-    return a
-
-
-@wp.kernel
-def assign_act_kernel(
-    b: wp.array2d(dtype=float),
-    # outputs
-    a: wp.array(dtype=float),
-):
-    tid = wp.tid()
-    a[2 * tid] = b[tid, 0]
-
-
-def float_assign_joint_act(a, b):
-    wp.launch(
-        assign_act_kernel,
-        dim=len(b),
-        device=b.device,
-        inputs=[b],
-        outputs=[a],
-    )
-    return a
-
-
-class IntegratorSimulate(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx,
-        act,
-        joint_q_start,
-        joint_qd_start,
-        # joint_q_end,
-        # joint_qd_end,
-        model,
-        state_in,
-        integrator,
-        sim_dt,
-        sim_substeps,
-    ):
-        ctx.tape = wp.Tape()
-        ctx.model = model
-        ctx.act = wp.from_torch(act)
-        ctx.joint_q_start = wp.from_torch(joint_q_start)
-        ctx.joint_qd_start = wp.from_torch(joint_qd_start)
-        ctx.act.requires_grad = True
-        # allocate output
-        ctx.state_out = model.state(requires_grad=True)
-
-        with ctx.tape:
-            float_assign_joint_act(ctx.model.joint_act, ctx.act)
-            float_assign_2d(ctx.model.joint_q, ctx.joint_q_start)
-            float_assign_2d(ctx.model.joint_qd, ctx.joint_qd_start)
-            # updates body position/vel
-            for _ in range(sim_substeps):
-                state_in = ctx.state_out = integrator.simulate(
-                    model, state_in, ctx.state_out, sim_dt / float(sim_substeps)
-                )
-            # updates joint_q joint_qd
-            ctx.joint_q_end, ctx.joint_qd_end = ctx.model.joint_q, ctx.model.joint_qd
-            wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
-
-        return (
-            wp.to_torch(ctx.joint_q_end).view(-1, 2),
-            wp.to_torch(ctx.joint_qd_end).view(-1, 2),
-        )
-
-    @staticmethod
-    def backward(ctx, adj_joint_q, adj_joint_qd):
-
-        # map incoming Torch grads to our output variables
-        ctx.joint_q_end.grad = wp.from_torch(adj_joint_q.flatten())
-        ctx.joint_qd_end.grad = wp.from_torch(adj_joint_qd.flatten())
-
-        ctx.tape.backward()
-        joint_act_grad = wp.to_torch(ctx.tape.gradients[ctx.act])
-        joint_q_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_q_start])
-        joint_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_qd_start])
-        # print(f"joint_q_grad.norm(): {joint_q_grad.norm()}")
-        # print(f"joint_qd_grad.norm(): {joint_qd_grad.norm()}")
-        # print(f"joint_act_grad.norm(): {joint_act_grad.norm()}")
-
-        # return adjoint w.r.t. inputs
-        return (
-            joint_act_grad,
-            joint_q_grad,
-            joint_qd_grad,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+from utils.warp_utils import IntegratorSimulate
 
 
 class CartPoleSwingUpWarpEnv(WarpEnv):
@@ -272,12 +139,11 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.state = self.model.state(requires_grad=True)
-        self.model.joint_q.requires_grad = True
-        self.model.joint_qd.requires_grad = True
-        self.model.joint_act.requires_grad = True
-        self.state.body_q.requires_grad = True
-        self.state.body_qd.requires_grad = True
+        requires_grad = not self.no_grad
+        self.state = self.model.state(requires_grad=requires_grad)
+        self.model.joint_q.requires_grad = requires_grad
+        self.model.joint_qd.requires_grad = requires_grad
+        self.model.joint_act.requires_grad = requires_grad
 
         start_joint_q, start_joint_qd, start_joint_act = self.get_state(return_act=True)
         self.start_joint_q = start_joint_q.detach().view(self.num_envs, -1)
@@ -300,20 +166,30 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             actions = torch.clip(actions, -1.0, 1.0)
             self.actions = actions.view(self.num_envs, -1)
             joint_act = self.action_strength * actions
+            assert actions.requires_grad, "actions require grad"
 
             self.state.clear_forces()
 
-            self.joint_q, self.joint_qd = IntegratorSimulate.apply(
-                joint_act.detach(),
-                self.joint_q,
-                self.joint_qd,
-                self.model,
-                self.state,
-                self.integrator,
-                self.sim_dt,
-                self.sim_substeps,
-            )
-            self.state = self.model.state()
+            for _ in range(self.sim_substeps):
+                joint_q_next = torch.zeros(
+                    len(self.model.joint_q), device=self.device, requires_grad=True
+                )
+                joint_qd_next = torch.zeros(
+                    len(self.model.joint_qd), device=self.device, requires_grad=True
+                )
+
+                self.joint_q, self.joint_qd = IntegratorSimulate.apply(
+                    joint_act,
+                    self.joint_q,
+                    self.joint_qd,
+                    joint_q_next,
+                    joint_qd_next,
+                    self.model,
+                    self.state,
+                    self.integrator,
+                    self.sim_dt / self.sim_substeps,
+                )
+            self.state = self.model.state(requires_grad=True)
 
             self.sim_time += self.sim_dt
 
@@ -374,8 +250,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                     )
                     - 0.5
                 )
-            self.joint_q.requires_grad = True
-            self.joint_qd.requires_grad = True
+            self.joint_q.requires_grad = not self.no_grad
+            self.joint_qd.requires_grad = not self.no_grad
             self.model.joint_q.assign(wp.from_torch(self.joint_q.flatten()))
             self.model.joint_qd.assign(wp.from_torch(self.joint_qd.flatten()))
             self.model.joint_qd.assign(wp.from_torch(joint_act.flatten()))
@@ -395,7 +271,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             current_joint_q = wp.to_torch(self.model.joint_q).detach()
             current_joint_qd = wp.to_torch(self.model.joint_qd).detach()
             current_joint_act = wp.to_torch(self.model.joint_act).detach()
-            self.state = self.model.state(requires_grad=True)
+            self.state = self.model.state(requires_grad=(not self.no_grad))
             self.model.joint_q.assign(wp.from_torch(current_joint_q))
             self.model.joint_qd.assign(wp.from_torch(current_joint_qd))
             self.model.joint_act.assign(wp.from_torch(current_joint_act))
@@ -417,8 +293,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def calculateObservations(self):
         if self.joint_q is None:
             self.joint_q, self.joint_qd = self.get_state()
-            self.joint_q.requires_grad = True
-            self.joint_qd.requires_grad = True
+            self.joint_q.requires_grad = not self.no_grad
+            self.joint_qd.requires_grad = not self.no_grad
         x = self.joint_q[:, 0:1]
         theta = self.joint_q[:, 1:2]
         xdot = self.joint_qd[:, 0:1]

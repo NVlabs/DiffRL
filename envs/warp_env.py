@@ -21,7 +21,7 @@ class WarpEnv:
         env_name="warp_env",
     ):
         self.seed = seed
-        self.device = device
+        self.device = str(device).split(":")[0]
         self.visualize = render
         self.sim_time = 0.0
         self.num_frames = 0
