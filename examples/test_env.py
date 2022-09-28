@@ -61,7 +61,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="AntEnv")
+    parser.add_argument("--env", type=str, default="CartPoleSwingUpWarpEnv")
     parser.add_argument("--num-envs", type=int, default=64)
     parser.add_argument("--render", default=False, action="store_true")
 

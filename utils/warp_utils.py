@@ -115,49 +115,68 @@ class IntegratorSimulate(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        act,
-        joint_q_start,
-        joint_qd_start,
-        joint_q_end,
-        joint_qd_end,
         model,
         state_in,
         integrator,
         sim_dt,
+        act,
+        joint_q_start,
+        joint_qd_start,
+        state_out,
     ):
         ctx.tape = wp.Tape()
         ctx.model = model
         ctx.act = wp.from_torch(act)
         ctx.joint_q_start = wp.from_torch(joint_q_start)
         ctx.joint_qd_start = wp.from_torch(joint_qd_start)
-        ctx.joint_q_end = wp.from_torch(joint_q_end)
-        ctx.joint_qd_end = wp.from_torch(joint_qd_end)
+
+        ctx.joint_q_end = wp.zeros(
+            len(model.joint_q), dtype=wp.float32, requires_grad=True, device="cuda"
+        )
+        ctx.joint_qd_end = wp.zeros(
+            len(model.joint_qd), dtype=wp.float32, requires_grad=True, device="cuda"
+        )
+
+        # record gradients for act, joint_q, and joint_qd
         ctx.act.requires_grad = True
+        ctx.joint_q_start.requires_grad = True
+        ctx.joint_qd_start.requires_grad = True
+
+        ctx.model.joint_q.requires_grad = True
+        ctx.model.joint_qd.requires_grad = True
+        ctx.model.joint_act.requires_grad = True
+        ctx.model.body_q.requires_grad = True
+        ctx.model.body_qd.requires_grad = True
+
         # allocate output
-        ctx.state_out = model.state(requires_grad=True)
+        ctx.state_out = state_out
 
         with ctx.tape:
             float_assign_joint_act(ctx.model.joint_act, ctx.act)
-            float_assign_2d(ctx.model.joint_q, ctx.joint_q_start)
-            float_assign_2d(ctx.model.joint_qd, ctx.joint_qd_start)
+            # float_assign(ctx.model.joint_q, ctx.joint_q_start)
+            # float_assign(ctx.model.joint_qd, ctx.joint_qd_start)
             # updates body position/vel
+            wp.sim.eval_fk(
+                ctx.model, ctx.joint_q_start, ctx.joint_qd_start, None, state_in
+            )
             ctx.state_out = integrator.simulate(model, state_in, ctx.state_out, sim_dt)
             # updates joint_q joint_qd
-            float_assign(ctx.joint_q_end, ctx.model.joint_q)
-            float_assign(ctx.joint_qd_end, ctx.model.joint_qd)
             wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
-
+            # wp.sim.eval_ik(
+            #     ctx.model, ctx.state_out, ctx.model.joint_q, ctx.model.joint_qd
+            # )
         return (
-            wp.to_torch(ctx.joint_q_end).view(-1, 2),
-            wp.to_torch(ctx.joint_qd_end).view(-1, 2),
+            wp.to_torch(ctx.joint_q_end),
+            wp.to_torch(ctx.joint_qd_end),
+            ctx.state_out,
         )
 
     @staticmethod
-    def backward(ctx, adj_joint_q, adj_joint_qd):
+    def backward(ctx, adj_joint_q, adj_joint_qd, _):
 
         # map incoming Torch grads to our output variables
-        ctx.joint_q_end.grad = wp.from_torch(adj_joint_q.flatten())
-        ctx.joint_qd_end.grad = wp.from_torch(adj_joint_qd.flatten())
+        ctx.joint_q_end.grad = wp.from_torch(adj_joint_q)
+        ctx.joint_qd_end.grad = wp.from_torch(adj_joint_qd)
 
         ctx.tape.backward()
         joint_act_grad = wp.to_torch(ctx.tape.gradients[ctx.act])
@@ -166,16 +185,15 @@ class IntegratorSimulate(torch.autograd.Function):
         # print(f"joint_q_grad.norm(): {joint_q_grad.norm()}")
         # print(f"joint_qd_grad.norm(): {joint_qd_grad.norm()}")
         # print(f"joint_act_grad.norm(): {joint_act_grad.norm()}")
-
+        ctx.tape.zero()
         # return adjoint w.r.t. inputs
         return (
+            None,
+            None,
+            None,
+            None,
             joint_act_grad,
             joint_q_grad,
             joint_qd_grad,
-            None,
-            None,
-            None,
-            None,
-            None,
             None,
         )

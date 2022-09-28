@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import warp as wp
+import warp.sim.render
 
 import numpy as np
 
@@ -71,13 +72,11 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
-            self.stage = wp.sim.render.SimRenderer(
-                self.model,
-                os.path.join(
-                    os.path.dirname(__file__),
-                    f"outputs/CartPoleSwingUp_{self.num_envs}.usd",
-                ),
+            stage_path = os.path.join(
+                f"outputs/CartPoleSwingUpWarp_{self.num_envs}.usd",
             )
+            print(f"created stage, {stage_path}")
+            self.stage = wp.sim.render.SimRenderer(self.model, stage_path)
             self.stage.draw_points = True
             self.stage.draw_springs = True
             self.stage.draw_shapes = True
@@ -116,7 +115,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             shape_kf=1.0e2,
             shape_mu=1.0,
             limit_ke=1.0e4,
-            limit_kd=1.0e1,
+            limit_kd=1.0,
         )
 
         self.builder = wp.sim.ModelBuilder()
@@ -125,7 +124,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.builder.add_rigid_articulation(
                 self.articulation_builder,
                 xform=wp.transform(
-                    np.array((i * 2.0, 4.0, 0.0)),
+                    np.array((0.0, 4.0, self.env_dist * i)),
                     wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
                 ),
             )
@@ -139,11 +138,13 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        requires_grad = not self.no_grad
-        self.state = self.model.state(requires_grad=requires_grad)
-        self.model.joint_q.requires_grad = requires_grad
-        self.model.joint_qd.requires_grad = requires_grad
-        self.model.joint_act.requires_grad = requires_grad
+        if not self.no_grad:
+            self.state = self.model.state(requires_grad=True)
+            self.model.joint_q.requires_grad = True
+            self.model.joint_qd.requires_grad = True
+            self.model.joint_act.requires_grad = True
+        else:
+            self.state = self.model.state(requires_grad=False)
 
         start_joint_q, start_joint_qd, start_joint_act = self.get_state(return_act=True)
         self.start_joint_q = start_joint_q.detach().view(self.num_envs, -1)
@@ -153,12 +154,11 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def render(self, mode="human"):
         if self.visualize:
             self.render_time += self.dt
-            self.stage.update(self.state, self.render_time)
+            self.stage.begin_frame(self.render_time)
+            self.stage.render(self.state)
+            self.stage.end_frame()
             if self.num_frames == 40:
-                try:
-                    self.stage.Save()
-                except:
-                    print("USD save error")
+                self.stage.save()
                 self.num_frames -= 40
 
     def step(self, actions):
@@ -166,30 +166,22 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             actions = torch.clip(actions, -1.0, 1.0)
             self.actions = actions.view(self.num_envs, -1)
             joint_act = self.action_strength * actions
-            assert actions.requires_grad, "actions require grad"
 
             self.state.clear_forces()
 
             for _ in range(self.sim_substeps):
-                joint_q_next = torch.zeros(
-                    len(self.model.joint_q), device=self.device, requires_grad=True
-                )
-                joint_qd_next = torch.zeros(
-                    len(self.model.joint_qd), device=self.device, requires_grad=True
-                )
-
-                self.joint_q, self.joint_qd = IntegratorSimulate.apply(
-                    joint_act,
-                    self.joint_q,
-                    self.joint_qd,
-                    joint_q_next,
-                    joint_qd_next,
+                requires_grad = not self.no_grad
+                state_out = self.model.state(requires_grad=requires_grad)
+                self.joint_q, self.joint_qd, self.state = IntegratorSimulate.apply(
                     self.model,
                     self.state,
                     self.integrator,
                     self.sim_dt / self.sim_substeps,
+                    joint_act,
+                    self.joint_q,
+                    self.joint_qd,
+                    state_out,
                 )
-            self.state = self.model.state(requires_grad=True)
 
             self.sim_time += self.sim_dt
 
@@ -198,7 +190,6 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.progress_buf += 1
         self.num_frames += 1
 
-        # self.joint_q, self.joint_qd = self.joint_q_next, self.joint_qd_next
         self.calculateObservations()
         self.calculateReward()
 
@@ -250,11 +241,16 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                     )
                     - 0.5
                 )
-            self.joint_q.requires_grad = not self.no_grad
-            self.joint_qd.requires_grad = not self.no_grad
-            self.model.joint_q.assign(wp.from_torch(self.joint_q.flatten()))
-            self.model.joint_qd.assign(wp.from_torch(self.joint_qd.flatten()))
-            self.model.joint_qd.assign(wp.from_torch(joint_act.flatten()))
+            requires_grad = not self.no_grad
+            self.joint_q.requires_grad = requires_grad
+            self.joint_qd.requires_grad = requires_grad
+            joint_act.requires_grad = requires_grad
+            joint_act = joint_act.view(-1)
+            self.joint_q = self.joint_q.view(-1)
+            self.joint_qd = self.joint_qd.view(-1)
+            self.model.joint_q.assign(wp.from_torch(self.joint_q))
+            self.model.joint_qd.assign(wp.from_torch(self.joint_qd))
+            self.model.joint_act.assign(wp.from_torch(joint_act))
 
             self.progress_buf[env_ids] = 0
 
@@ -271,7 +267,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             current_joint_q = wp.to_torch(self.model.joint_q).detach()
             current_joint_qd = wp.to_torch(self.model.joint_qd).detach()
             current_joint_act = wp.to_torch(self.model.joint_act).detach()
-            self.state = self.model.state(requires_grad=(not self.no_grad))
+            requires_grad = not self.no_grad
+            self.state = self.model.state(requires_grad=requires_grad)
             self.model.joint_q.assign(wp.from_torch(current_joint_q))
             self.model.joint_qd.assign(wp.from_torch(current_joint_qd))
             self.model.joint_act.assign(wp.from_torch(current_joint_act))
@@ -279,13 +276,17 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.model.joint_qd.grad.zero_()
             self.model.joint_act.grad.zero_()
             self.joint_q = None
-
-    """
-    This function starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.
-    It has to be called every time the algorithm starts an episode and return the observation vectors
-    """
+        if not self.no_grad:
+            self.model.joint_q.requires_grad = True
+            self.model.joint_qd.requires_grad = True
+            self.model.joint_act.requires_grad = True
+            self.model.body_q.requires_grad = True
+            self.model.body_qd.requires_grad = True
 
     def initialize_trajectory(self):
+        """ initialize_trajectory() starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.
+        It has to be called every time the algorithm starts an episode and return the observation vectors
+        """
         self.clear_grad()
         self.calculateObservations()
         return self.obs_buf
@@ -293,12 +294,18 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def calculateObservations(self):
         if self.joint_q is None:
             self.joint_q, self.joint_qd = self.get_state()
-            self.joint_q.requires_grad = not self.no_grad
-            self.joint_qd.requires_grad = not self.no_grad
-        x = self.joint_q[:, 0:1]
-        theta = self.joint_q[:, 1:2]
-        xdot = self.joint_qd[:, 0:1]
-        theta_dot = self.joint_qd[:, 1:2]
+            if not self.no_grad:
+                self.joint_q.requires_grad = True
+                self.joint_qd.requires_grad = True
+                self.model.joint_act.requires_grad = True
+                self.model.body_q.requires_grad = True
+                self.model.body_qd.requires_grad = True
+        joint_q, joint_qd = self.joint_q.view(self.num_envs, -1), self.joint_qd.view(self.num_envs, -1)
+
+        x = joint_q[:, 0:1]
+        theta = joint_q[:, 1:2]
+        xdot = joint_qd[:, 0:1]
+        theta_dot = joint_qd[:, 1:2]
 
         # observations: [x, xdot, sin(theta), cos(theta), theta_dot]
         self.obs_buf = torch.cat(
@@ -306,10 +313,13 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         )
 
     def calculateReward(self):
-        x = self.joint_q[:, 0]
-        theta = tu.normalize_angle(self.joint_q[:, 1])
-        xdot = self.joint_qd[:, 0]
-        theta_dot = self.joint_qd[:, 1]
+        joint_q = self.joint_q.view(self.num_envs, -1)
+        joint_qd = self.joint_qd.view(self.num_envs, -1)
+
+        x = joint_q[:, 0]
+        theta = tu.normalize_angle(joint_q[:, 1])
+        xdot = joint_qd[:, 0]
+        theta_dot = joint_qd[:, 1]
 
         self.rew_buf = (
             -torch.pow(theta, 2.0) * self.pole_angle_penalty
