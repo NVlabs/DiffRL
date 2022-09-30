@@ -43,7 +43,6 @@ def main(args):
 
     def test_fn(actions, plot=False):
         ob_vec = []
-        env.initialize_trajectory()
         ob_vec.append(env.reset().detach().cpu().numpy().flatten())
         for _ in range(10):
             obs, reward, done, info = env.step(actions)
@@ -59,16 +58,22 @@ def main(args):
 
     num_actions = env.num_actions
     torch.manual_seed(123)
-    actions = torch.randn(
-        (args.num_envs, num_actions), device="cuda", requires_grad=True
-    )
-    reward = test_fn(actions, False)
-    reward.mean().backward()
-    print(reward)
-    print(actions.grad)
+    for i in range(5):
+        # actions = torch.randn(
+        #     (args.num_envs, num_actions), device="cuda", requires_grad=True
+        # ) 
+        actions = torch.tensor([[0.0637]], device='cuda', requires_grad=True)
+        reward = test_fn(actions, False)
+        reward.mean().backward()
+        print(reward)
+        print("actions",
+              actions,
+              "actions.grad:",
+              actions.grad)
 
-    # check against finite differencing
-    assert torch.autograd.gradcheck(test_fn, (actions,), eps=1e-6, atol=1e-4)
+        # check against finite differencing
+        assert torch.autograd.gradcheck(test_fn, (actions,), eps=1e-6, atol=1e-4)
+        actions = actions.detach()
 
     # t_start = time.time()
 

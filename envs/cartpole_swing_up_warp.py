@@ -30,6 +30,16 @@ except ModuleNotFoundError:
 from utils import torch_utils as tu
 from utils.warp_utils import IntegratorSimulate
 
+def check_grads(wp_struct):
+    for var in wp_struct.__dict__:
+        if isinstance(getattr(wp_struct, var), wp.array):
+            arr = getattr(wp_struct, var)
+            if arr.requires_grad:
+                assert (np.count_nonzero(arr.grad.numpy()) == 0), "var grad is non_zero"
+            else:
+                if arr.dtype in [wp.vec3, wp.vec4, float, wp.float32]:
+                    print(var)
+
 
 class CartPoleSwingUpWarpEnv(WarpEnv):
     def __init__(
@@ -67,7 +77,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.cart_position_penalty = 0.05
         self.cart_velocity_penalty = 0.1
 
-        self.cart_action_penalty = 0.0
+        self.cart_action_penalty = 0.1
 
         # -----------------------
         # set up Usd renderer
@@ -106,15 +116,15 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                 wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
             ),
             floating=False,
-            density=0,
-            armature=0.1,
-            stiffness=0.0,
-            damping=0.0,
-            shape_ke=1.0e4,
-            shape_kd=1.0e2,
-            shape_kf=1.0e2,
-            shape_mu=1.0,
-            limit_ke=1.0e4,
+            # density=0,
+            # armature=0.1,
+            # stiffness=0.0,
+            # damping=0.0,
+            # shape_ke=1.0e4,
+            shape_kd=1.0e4,
+            # shape_kf=1.0e2,
+            # shape_mu=1.0,
+            # limit_ke=1.0e4,
             limit_kd=1.0,
         )
 
@@ -124,14 +134,14 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.builder.add_rigid_articulation(
                 self.articulation_builder,
                 xform=wp.transform(
-                    np.array((0.0, 4.0, self.env_dist * i)),
+                    np.array((0.0, 2.5, self.env_dist * i)),
                     wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
                 ),
             )
             self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
 
         self.model = self.builder.finalize(str(self.device))
-        self.model.ground = True
+        self.model.ground = False
 
         self.model.joint_attach_ke = 1600.0
         self.model.joint_attach_kd = 20.0
@@ -221,21 +231,25 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                 env_ids = torch.arange(
                     self.num_envs, dtype=torch.long, device=self.device
                 )
+            # clear_grad needs to be called before to zero grads
+            self.clear_grad()
         if env_ids is not None:
             # fixed start state
             self.joint_q, self.joint_qd, joint_act = self.get_state(return_act=True)
-            self.joint_q[env_ids] = self.start_joint_q[env_ids].clone()
-            self.joint_qd[env_ids] = self.start_joint_qd[env_ids].clone()
+            joint_q, joint_qd = self.joint_q.view(self.num_envs, -1), self.joint_qd.view(self.num_envs, -1)
+            joint_act = joint_act.view(self.num_envs, -1)
+            joint_q[env_ids] = self.start_joint_q[env_ids].clone()
+            joint_qd[env_ids] = self.start_joint_qd[env_ids].clone()
             joint_act[env_ids] = self.start_joint_act[env_ids].clone()
 
             if self.stochastic_init:
-                self.joint_q[env_ids] += np.pi * (
+                joint_q[env_ids] += np.pi * (
                     torch.rand(
                         size=(len(env_ids), self.num_joint_q), device=self.device
                     )
                     - 0.5
                 )
-                self.joint_qd[env_ids] += 0.5 * (
+                joint_qd[env_ids] += 0.5 * (
                     torch.rand(
                         size=(len(env_ids), self.num_joint_qd), device=self.device
                     )
@@ -246,8 +260,6 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.joint_qd.requires_grad = requires_grad
             joint_act.requires_grad = requires_grad
             joint_act = joint_act.view(-1)
-            self.joint_q = self.joint_q.view(-1)
-            self.joint_qd = self.joint_qd.view(-1)
             self.model.joint_q.assign(wp.from_torch(self.joint_q))
             self.model.joint_qd.assign(wp.from_torch(self.joint_qd))
             self.model.joint_act.assign(wp.from_torch(joint_act))
@@ -272,9 +284,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.model.joint_q.assign(wp.from_torch(current_joint_q))
             self.model.joint_qd.assign(wp.from_torch(current_joint_qd))
             self.model.joint_act.assign(wp.from_torch(current_joint_act))
-            self.model.joint_q.grad.zero_()
-            self.model.joint_qd.grad.zero_()
-            self.model.joint_act.grad.zero_()
+            # check_grads(self.model)
+            check_grads(self.state)
             self.joint_q = None
         if not self.no_grad:
             self.model.joint_q.requires_grad = True
@@ -282,6 +293,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.model.joint_act.requires_grad = True
             self.model.body_q.requires_grad = True
             self.model.body_qd.requires_grad = True
+            self.state.body_f.requires_grad = True
 
     def initialize_trajectory(self):
         """ initialize_trajectory() starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.

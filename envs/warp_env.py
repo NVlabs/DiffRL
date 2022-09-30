@@ -94,36 +94,11 @@ class WarpEnv:
     def get_state(self, return_act=False):
         """Returns model joint state (position and velocity)"""
         joint_q, joint_qd = (
-            wp.to_torch(self.model.joint_q).view(self.num_envs, -1),
-            wp.to_torch(self.model.joint_qd).view(self.num_envs, -1),
+            wp.to_torch(self.model.joint_q),
+            wp.to_torch(self.model.joint_qd),
         )
         if not return_act:
             return joint_q, joint_qd
-        joint_act = wp.to_torch(self.model.joint_act).view(self.num_envs, -1)
+        joint_act = wp.to_torch(self.model.joint_act)
         return joint_q, joint_qd, joint_act
 
-    def reset_with_state(
-        self, init_joint_q, init_joint_qd, env_ids=None, force_reset=True
-    ):
-        assert len(init_joint_q) == self.num_joint_q
-        assert len(init_joint_qd) == self.num_joint_qd
-        if env_ids is None:
-            if force_reset == True:
-                env_ids = torch.arange(
-                    self.num_envs, dtype=torch.long, device=self.device
-                )
-
-        if env_ids is not None:
-            # fixed start state
-            wp.to_torch(self.model.joint_q).view(self.num_envs, -1)[
-                env_ids, :
-            ] = init_joint_q.view(-1, self.num_joint_q)[env_ids, :].clone()
-            wp.to_torch(self.model.joint_qd).view(self.num_envs, -1)[
-                env_ids, :
-            ] = init_joint_qd.view(-1, self.num_joint_qd)[env_ids, :].clone()
-
-            self.progress_buf[env_ids] = 0
-
-            self.calculateObservations()
-
-        return self.obs_buf

@@ -1,7 +1,6 @@
 import warp as wp
 import torch
 
-
 @wp.kernel
 def assign_kernel(
     b: wp.array(dtype=float),
@@ -147,6 +146,20 @@ class IntegratorSimulate(torch.autograd.Function):
         ctx.model.joint_act.requires_grad = True
         ctx.model.body_q.requires_grad = True
         ctx.model.body_qd.requires_grad = True
+        ctx.model.body_com.requires_grad = True
+        ctx.model.joint_target.requires_grad = True
+        ctx.model.joint_target_ke.requires_grad = True
+        ctx.model.joint_target_kd.requires_grad = True
+        ctx.model.joint_X_p.requires_grad = True
+        ctx.model.joint_X_c.requires_grad = True
+        ctx.model.joint_q_start.requires_grad = True
+        ctx.model.joint_qd_start.requires_grad = True
+
+        ctx.model.shape_materials.ke.requires_grad = True
+        ctx.model.shape_materials.kd.requires_grad = True
+        ctx.model.shape_materials.kf.requires_grad = True
+        ctx.model.shape_materials.mu.requires_grad = True
+        ctx.model.shape_materials.restitution.requires_grad = True 
 
         # allocate output
         ctx.state_out = state_out
@@ -182,9 +195,6 @@ class IntegratorSimulate(torch.autograd.Function):
         joint_act_grad = wp.to_torch(ctx.tape.gradients[ctx.act])
         joint_q_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_q_start])
         joint_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_qd_start])
-        # print(f"joint_q_grad.norm(): {joint_q_grad.norm()}")
-        # print(f"joint_qd_grad.norm(): {joint_qd_grad.norm()}")
-        # print(f"joint_act_grad.norm(): {joint_act_grad.norm()}")
         ctx.tape.zero()
         # return adjoint w.r.t. inputs
         return (
