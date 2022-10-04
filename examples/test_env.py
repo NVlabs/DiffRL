@@ -35,11 +35,14 @@ def main(args):
         no_grad=True,
     )
     if issubclass(env_fn, envs.DFlexEnv):
-        env_fn_kwargs["MM_caching_frequency"] = 16
+        env_fn_kwargs["MM_caching_frequency"] = 1
 
     env = env_fn(**env_fn_kwargs)
+    # sets seed
+    torch.manual_seed(123)
 
     obs = env.reset()
+    print(obs)
 
     num_actions = env.num_actions
 
@@ -47,8 +50,10 @@ def main(args):
 
     reward_episode = 0.0
     for i in range(1000):
-        actions = torch.randn((args.num_envs, num_actions), device="cuda")
+        actions = torch.zeros((args.num_envs, num_actions), device="cuda")
         obs, reward, done, info = env.step(actions)
+        if i % 40 == 0:
+            print(obs)
         reward_episode += reward
 
     t_end = time.time()
