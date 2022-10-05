@@ -85,7 +85,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def init_sim(self):
         wp.init()
         self.dt = 1.0 / 60.0
-        self.sim_substeps = 4
+        self.sim_substeps = 1
         self.sim_dt = self.dt
 
         if self.visualize:
@@ -177,8 +177,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                 self.sim_dt,
                 self.sim_substeps,
                 joint_act,
-                self.joint_q.detach(),  # cut off grad to prev timestep?
-                self.joint_qd.detach(),  # cut off grad to prev timestep?
+                wp.to_torch(self.state.body_q),  # cut off grad to prev timestep?
+                wp.to_torch(self.state.body_qd),  # cut off grad to prev timestep?
                 # state_out,
             )
 

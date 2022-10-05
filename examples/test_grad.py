@@ -23,6 +23,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+EPS = 0.1
+
 def test_gradcheck_zero_ac(args):
     seeding()
     env_fn = getattr(envs, args.env)
@@ -50,7 +52,7 @@ def test_gradcheck_zero_ac(args):
             ret = r + ret * 0.999
         return r  
     actions = torch.tensor([[0.]], device='cuda', requires_grad=True)
-    assert torch.autograd.gradcheck(test_fn, (actions,), eps=1, atol=1e-4)
+    assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=1e-4)
 
 def test_gradcheck_rand_ac(args):
     seeding()
@@ -98,7 +100,7 @@ def test_gradcheck_rand_ac(args):
         #    actions.grad.zero_()
 
         # check against finite differencing, eps,  atol rtol = 1e-6 
-        assert torch.autograd.gradcheck(test_fn, (actions,), eps=1, atol=1e-4)
+        assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=1e-4)
         # num_grad, anal_grad = check_grad(test_fn, actions)
 
         print("Finish Successfully")
