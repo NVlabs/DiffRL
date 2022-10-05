@@ -24,28 +24,6 @@ def float_assign(a, b):
 
 
 @wp.kernel
-def assign_kernel_2d(
-    b: wp.array2d(dtype=float),
-    # outputs
-    a: wp.array(dtype=float),
-):
-    tid = wp.tid()
-    a[2 * tid] = b[tid, 0]
-    a[2 * tid + 1] = b[tid, 1]
-
-
-def float_assign_2d(a, b):
-    wp.launch(
-        assign_kernel_2d,
-        dim=len(b),
-        device=b.device,
-        inputs=[b],
-        outputs=[a],
-    )
-    return a
-
-
-@wp.kernel
 def assign_act_kernel(
     b: wp.array2d(dtype=float),
     # outputs
@@ -65,52 +43,6 @@ def float_assign_joint_act(a, b):
         outputs=[a],
     )
     return a
-
-
-class KernelAutogradFunc(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx,
-        integrator,
-        model,
-        state_in,
-        dt,
-        substeps,
-        *tensors,
-    ):
-        ctx.tape = wp.Tape()
-        ctx.model = model
-        ctx.inputs = [wp.from_torch(t) for t in tensors]
-        # allocate output
-
-        with ctx.tape:
-            float_assign_joint_act(ctx.model.joint_act, ctx.act)
-            float_assign_2d(ctx.model.joint_q, ctx.joint_q_start)
-            float_assign_2d(ctx.model.joint_qd, ctx.joint_qd_start)
-            # updates body position/vel
-            for _ in range(substeps):
-                state_out = model.state(requires_grad=True)
-                state_in = integrator.simulate(
-                    model, state_in, state_out, dt / float(substeps)
-                )
-            ctx.state_out = state_in
-            # updates joint_q joint_qd
-            ctx.joint_q_end, ctx.joint_qd_end = model.joint_q, model.joint_qd
-            wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
-
-        ctx.outputs = to_weak_list(
-            ctx.state_out.flatten() + [ctx.joint_q_end, ctx.joint_qd_end]
-        )
-        return tuple([wp.to_torch(x) for x in ctx.outputs])
-
-    @staticmethod
-    def backward(ctx, *adj_outputs):  # , adj_joint_q, adj_joint_qd):
-        for adj_out, out in zip(adj_outputs, ctx.outputs):
-            out.grad = wp.from_torch(adj_out)
-        ctx.tape.backward()
-        adj_inputs = [ctx.tape.get(x, None) for x in self.inputs]
-        return (None, None, None, None, None, *filter_grads(adj_inputs))
-
 
 class IntegratorSimulate(torch.autograd.Function):
     @staticmethod
@@ -211,5 +143,4 @@ def check_grads(wp_struct):
             else:
                 if arr.dtype in [wp.vec3, wp.vec4, float, wp.float32]:
                     print(var)
-
 

@@ -31,7 +31,7 @@ def main(args):
         device="cuda",
         render=args.render,
         seed=0,
-        stochastic_init=True,
+        stochastic_init=False,
         no_grad=True,
     )
     if issubclass(env_fn, envs.DFlexEnv):

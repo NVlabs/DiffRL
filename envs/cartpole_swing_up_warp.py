@@ -85,7 +85,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def init_sim(self):
         wp.init()
         self.dt = 1.0 / 60.0
-        self.sim_substeps = 1
+        self.sim_substeps = 4
         self.sim_dt = self.dt
 
         if self.visualize:
@@ -128,7 +128,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                     wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
                 ),
             )
-            self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
+            self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi + .3
             self.builder.joint_target[i * self.num_joint_q:(i+1) * self.num_joint_q] = [0., 0.]
 
         self.model = self.builder.finalize(str(self.device))
@@ -229,7 +229,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             joint_act = torch.zeros_like(self.joint_q, device=self.device)
             joint_q, joint_qd = self.joint_q.view(self.num_envs, -1), self.joint_qd.view(self.num_envs, -1)
             joint_act = joint_act.view(self.num_envs, -1)
-            joint_q[env_ids] = self.start_joint_q[env_ids].clone() + .3
+            joint_q[env_ids] = self.start_joint_q[env_ids].clone()
             joint_qd[env_ids] = self.start_joint_qd[env_ids].clone()
             joint_act[env_ids] = self.start_joint_act[env_ids].clone()
 
