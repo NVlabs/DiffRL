@@ -16,11 +16,13 @@ class WarpEnv:
         num_act,
         episode_length,
         seed=0,
+        no_grad=True,
         render=True,
         device="cuda",
         env_name="warp_env",
     ):
         self.seed = seed
+        self.no_grad = no_grad
         self.device = str(device).split(":")[0]
         self.visualize = render
         self.sim_time = 0.0

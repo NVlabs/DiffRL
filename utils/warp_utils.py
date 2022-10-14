@@ -1,6 +1,7 @@
 import warp as wp
 import numpy as np
 import torch
+import pdb
 
 @wp.kernel
 def assign_kernel(
@@ -44,34 +45,65 @@ def float_assign_joint_act(a, b):
     )
     return a
 
+
+@wp.kernel
+def assign_transform_kernel(
+        b: wp.array(dtype=wp.transform),
+        # outputs
+        a: wp.array(dtype=wp.transform),
+):
+    tid = wp.tid()
+    a[tid] = b[tid]
+
+
+def transform_assign(a, b):
+    wp.launch(
+        assign_transform_kernel,
+        dim=len(b),
+        device=b.device,
+        inputs=[b],
+        outputs=[a],
+    )
+    return a
+
+@wp.kernel
+def assign_spatial_kernel(
+        b: wp.array(dtype=wp.spatial_vector),
+        # outputs
+        a: wp.array(dtype=wp.spatial_vector),
+):
+    tid = wp.tid()
+    a[tid] = b[tid]
+
+def spatial_assign(a, b):
+    wp.launch(
+        assign_spatial_kernel,
+        dim=len(b),
+        device=b.device,
+        inputs=[b],
+        outputs=[a],
+    )
+    return a
+
 class IntegratorSimulate(torch.autograd.Function):
     @staticmethod
-    def forward(
-        ctx,
-        model,
-        state_in,
-        integrator,
-        dt,
-        substeps,
-        act,
-        joint_q_start,
-        joint_qd_start,
-    ):
+    def forward(ctx, model, state_in, integrator, dt, substeps, act, body_q, body_qd, state_out):
         ctx.tape = wp.Tape()
         ctx.model = model
         ctx.act = wp.from_torch(act)
-        ctx.joint_q_start = wp.from_torch(joint_q_start)
-        ctx.joint_qd_start = wp.from_torch(joint_qd_start)
+        ctx.body_q = wp.from_torch(body_q, dtype=wp.transform)
+        ctx.body_qd = wp.from_torch(body_qd, dtype=wp.spatial_vector)
+        ctx.state_in = state_in
 
         ctx.joint_q_end = wp.zeros_like(model.joint_q)
         ctx.joint_qd_end = wp.zeros_like(model.joint_qd)
 
         # record gradients for act, joint_q, and joint_qd
         ctx.act.requires_grad = True
-        ctx.joint_q_start.requires_grad = True
-        ctx.joint_qd_start.requires_grad = True
         ctx.joint_q_end.requires_grad = True
         ctx.joint_qd_end.requires_grad = True
+        ctx.body_q.requires_grad = True
+        ctx.body_qd.requires_grad = True
 
         ctx.model.shape_materials.ke.requires_grad = True
         ctx.model.shape_materials.kd.requires_grad = True
@@ -80,33 +112,34 @@ class IntegratorSimulate(torch.autograd.Function):
         ctx.model.shape_materials.restitution.requires_grad = True 
 
         with ctx.tape:
-            # float_assign(ctx.model.joint_q, ctx.joint_q_start)
-            # float_assign(ctx.model.joint_qd, ctx.joint_qd_start)
-
-            wp.sim.eval_fk(
-                ctx.model, ctx.joint_q_start, ctx.joint_qd_start, None, state_in
-            )
-            for _ in range(substeps):
-                float_assign_joint_act(ctx.model.joint_act, ctx.act)
+            float_assign_joint_act(ctx.model.joint_act, ctx.act)
+            transform_assign(ctx.state_in.body_q, ctx.body_q)
+            spatial_assign(ctx.state_in.body_qd, ctx.body_qd)
+            # wp.sim.eval_fk(ctx.model, ctx.model.joint_q, ctx.model.joint_qd, None, state_in)
+            for _ in range(substeps - 1):
                 state_in.clear_forces()
                 state_temp = model.state(requires_grad=True)
                 state_temp = integrator.simulate(
-                    model, state_in, state_temp, dt / float(substeps)
+                    ctx.model, state_in, state_temp, dt / float(substeps),
+                    requires_grad=True
                 )
                 state_in = state_temp
-
-            # updates body position/vel
-            ctx.state_out = state_temp
+            state_in.clear_forces()
             # updates joint_q joint_qd
+            ctx.state_out = integrator.simulate(ctx.model, state_in, state_out, dt / float(substeps), requires_grad=True)
+            # ctx.state_out = state_temp
             wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
+
+        joint_q_end = wp.to_torch(ctx.joint_q_end)
+        joint_qd_end = wp.to_torch(ctx.joint_qd_end)
         return (
-            wp.to_torch(ctx.joint_q_end),
-            wp.to_torch(ctx.joint_qd_end),
+            joint_q_end,
+            joint_qd_end,
             ctx.state_out,
         )
 
     @staticmethod
-    def backward(ctx, adj_joint_q, adj_joint_qd, _):
+    def backward(ctx, adj_joint_q, adj_joint_qd, _a):
 
         # map incoming Torch grads to our output variables
         ctx.joint_q_end.grad = wp.from_torch(adj_joint_q)
@@ -114,24 +147,15 @@ class IntegratorSimulate(torch.autograd.Function):
 
         ctx.tape.backward()
         joint_act_grad = wp.to_torch(ctx.tape.gradients[ctx.act]).clone()
-        joint_q_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_q_start]).clone()
-        joint_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.joint_qd_start]).clone()
-        print(f"joint_act_grad, {joint_act_grad}")
-        print(f"joint_q_grad, {joint_q_grad}")
-        print(f"joint_qd_grad, {joint_qd_grad}")
+        body_q_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_q]).clone()
+        body_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_qd]).clone()
+        # print(f"joint_act_grad, {joint_act_grad}")
+        # print(f"body_q_grad, {body_q_grad}")
+        # print(f"body_qd_grad, {body_qd_grad}")
         
         ctx.tape.zero()
         # return adjoint w.r.t. inputs
-        return (
-            None,
-            None,
-            None,
-            None,
-            None,
-            joint_act_grad,
-            joint_q_grad,
-            joint_qd_grad,
-        )
+        return (None, None, None, None, None, joint_act_grad, body_q_grad, body_qd_grad, None)
 
 
 def check_grads(wp_struct):

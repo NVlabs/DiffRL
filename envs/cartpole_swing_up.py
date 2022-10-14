@@ -90,7 +90,7 @@ class CartPoleSwingUpEnv(DFlexEnv):
             self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
         
         self.model = self.builder.finalize(self.device)
-        self.model.ground = False
+        self.model.ground = True
         self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype = torch.float, device = self.device)
 
         self.integrator = df.sim.SemiImplicitIntegrator()

@@ -24,8 +24,9 @@ import numpy as np
 
 
 EPS = 0.1
+ATOL = 1e-4
 
-def test_gradcheck_zero_ac(args):
+def test_gradcheck_zero_ac(args, num_steps):
     seeding()
     env_fn = getattr(envs, args.env)
     env_fn_kwargs = dict(
@@ -45,16 +46,16 @@ def test_gradcheck_zero_ac(args):
         ob_vec = []
         ob_vec.append(env.reset().detach().cpu().numpy().flatten())
         ret = 0
-        for _ in range(1):
+        for _ in range(num_steps):
             obs, r, done, info = env.step(actions)
             print(obs)
             ob_vec.append(obs.detach().cpu().numpy().flatten())
             ret = r + ret * 0.999
         return r  
     actions = torch.tensor([[0.]], device='cuda', requires_grad=True)
-    assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=1e-4)
+    assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=ATOL)
 
-def test_gradcheck_rand_ac(args):
+def test_gradcheck_rand_ac(args, num_steps):
     seeding()
 
     def test_fn(actions, plot=False):
@@ -76,7 +77,7 @@ def test_gradcheck_rand_ac(args):
         ob_vec = []
         ob_vec.append(env.reset().detach().cpu().numpy().flatten())
         ret = 0
-        for _ in range(1):
+        for _ in range(num_steps):
             obs, r, done, info = env.step(actions)
             print(obs)
             ob_vec.append(obs.detach().cpu().numpy().flatten())
@@ -101,7 +102,7 @@ def test_gradcheck_rand_ac(args):
 
         # check against finite differencing, eps,  atol rtol = 1e-6 
         assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=1e-4)
-        # num_grad, anal_grad = check_grad(test_fn, actions)
+        # num_grad, anal_grad = check_grad(test_fn, actions, eps=EPS, atol=ATOL, rtol=RTOL)
 
         print("Finish Successfully")
 
@@ -119,10 +120,14 @@ def check_grad(fn, inputs, eps=1e-6, atol=1e-4, rtol=1e-6):
 
 
 def main(args):
-    test_gradcheck_zero_ac(args)
-    print("test_grad: zero action gradcheck passed")
-    test_gradcheck_rand_ac(args)
-    print("test_grad: rand action gradcheck passed")
+    test_gradcheck_zero_ac(args, 1)
+    print("test_grad: zero action gradcheck passed, num_steps=1")
+    test_gradcheck_rand_ac(args, 1)
+    print("test_grad: rand action gradcheck passed, num_steps=1")
+    test_gradcheck_zero_ac(args, 10)
+    print("test_grad: zero action gradcheck passed, num_steps=10")
+    test_gradcheck_rand_ac(args, 10)
+    print("test_grad: rand action gradcheck passed, num_steps=10")
 
 
 if __name__ == "__main__":

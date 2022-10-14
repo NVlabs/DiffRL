@@ -51,7 +51,6 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             num_envs, num_obs, num_act, episode_length, seed, render, device
         )
 
-        self.no_grad = no_grad
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
 
@@ -85,7 +84,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
     def init_sim(self):
         wp.init()
         self.dt = 1.0 / 60.0
-        self.sim_substeps = 1
+        self.sim_substeps = 4
         self.sim_dt = self.dt
 
         if self.visualize:
@@ -128,7 +127,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                     wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
                 ),
             )
-            self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi + .3
+            self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
             self.builder.joint_target[i * self.num_joint_q:(i+1) * self.num_joint_q] = [0., 0.]
 
         self.model = self.builder.finalize(str(self.device))
@@ -169,18 +168,34 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             joint_act = self.action_strength * actions
 
             requires_grad = not self.no_grad
-            # state_out = self.model.state(requires_grad=requires_grad)
-            self.joint_q, self.joint_qd, self.state = IntegratorSimulate.apply(
-                self.model,
-                self.state,
-                self.integrator,
-                self.sim_dt,
-                self.sim_substeps,
-                joint_act,
-                wp.to_torch(self.state.body_q),  # cut off grad to prev timestep?
-                wp.to_torch(self.state.body_qd),  # cut off grad to prev timestep?
-                # state_out,
-            )
+            if not self.no_grad:
+                body_q = wp.to_torch(self.state.body_q)  # cut off grad to prev timestep?
+                body_qd = wp.to_torch(self.state.body_qd)  # cut off grad to prev timestep?
+                body_q.requires_grad = requires_grad
+                body_qd.requires_grad = requires_grad
+                state_out = self.model.state(requires_grad=requires_grad)
+                self.joint_q, self.joint_qd, self.state = IntegratorSimulate.apply(
+                    self.model,
+                    self.state,
+                    self.integrator,
+                    self.sim_dt,
+                    self.sim_substeps,
+                    joint_act,
+                    body_q.detach(),
+                    body_qd.detach(),
+                    state_out,
+                )
+            else:
+                for i in range(self.sim_substeps):
+                    state_out = self.model.state(requires_grad=requires_grad)
+                    self.state = self.integrator.simulate(self.model,
+                                                          self.state, state_out,
+                                                          self.sim_dt / float(self.sim_substeps)
+                    )
+                joint_q = wp.zeros(self.num_zeros, self.num_joint_q, device=self.device)
+                joint_qd = wp.zeros(self.num_zeros, self.num_joint_qd, device=self.device)
+                wp.sim.eval_ik(self.model, self.state, joint_q, joint_qd)
+                self.joint_q, self.joint_qd = wp.to_torch(joint_q), wp.to_torch(joint_qd)
 
             self.sim_time += self.sim_dt
 
@@ -256,6 +271,9 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             self.model.joint_qd.assign(wp.from_torch(self.joint_qd))
             self.model.joint_act.assign(wp.from_torch(joint_act))
             self.state = self.model.state(requires_grad=requires_grad)
+            # updates state body positions after reset
+            # TODO: does this also pass through gradients between state.body_q/qd to
+            #       joint_q?
             wp.sim.eval_fk(
                 self.model, self.model.joint_q, self.model.joint_qd, None, self.state
             )
@@ -274,18 +292,17 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             current_joint_qd = wp.to_torch(self.model.joint_qd).detach()
             current_joint_act = wp.to_torch(self.model.joint_act).detach()
             requires_grad = not self.no_grad
-            self.state = self.model.state(requires_grad=requires_grad)
             self.model.joint_q.assign(wp.from_torch(current_joint_q))
             self.model.joint_qd.assign(wp.from_torch(current_joint_qd))
             self.model.joint_act.assign(wp.from_torch(current_joint_act))
             self.joint_q = None
+            self.state = self.model.state(requires_grad=(not self.no_grad))
         if not self.no_grad:
             self.model.joint_q.requires_grad = True
             self.model.joint_qd.requires_grad = True
             self.model.joint_act.requires_grad = True
             self.model.body_q.requires_grad = True
             self.model.body_qd.requires_grad = True
-            self.state.body_f.requires_grad = True
 
     def initialize_trajectory(self):
         """ initialize_trajectory() starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.
