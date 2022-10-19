@@ -5,16 +5,16 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-#from numpy.lib.function_base import angle
-from envs.dflex_env import DFlexEnv
 import math
-import torch
-
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from copy import deepcopy
+import torch
+
+# from numpy.lib.function_base import angle
+from .dflex_env import DFlexEnv
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import dflex as df
 

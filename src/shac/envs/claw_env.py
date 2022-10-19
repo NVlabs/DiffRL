@@ -1,8 +1,8 @@
-import warp as wp
-import warp.sim
-
 from enum import Enum
-from envs.warp_env import WarpEnv
+
+import warp as wp
+
+from .warp_env import WarpEnv
 
 
 class GoalType(Enum):

@@ -5,12 +5,14 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from envs.dflex_env import DFlexEnv
 import math
-import torch
-
 import os
 import sys
+
+import torch
+
+from .dflex_env import DFlexEnv
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import dflex as df
@@ -90,7 +92,7 @@ class CartPoleSwingUpEnv(DFlexEnv):
             self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
         
         self.model = self.builder.finalize(self.device)
-        self.model.ground = True
+        self.model.ground = False
         self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype = torch.float, device = self.device)
 
         self.integrator = df.sim.SemiImplicitIntegrator()

@@ -87,7 +87,16 @@ def spatial_assign(a, b):
 
 class IntegratorSimulate(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, model, state_in, integrator, dt, substeps, act, body_q, body_qd, state_out):
+    def forward(ctx,
+                model,
+                state_in,
+                integrator,
+                dt,
+                substeps,
+                act,
+                body_q,
+                body_qd,
+                state_out,):
         ctx.tape = wp.Tape()
         ctx.model = model
         ctx.act = wp.from_torch(act)
@@ -113,8 +122,10 @@ class IntegratorSimulate(torch.autograd.Function):
 
         with ctx.tape:
             float_assign_joint_act(ctx.model.joint_act, ctx.act)
-            transform_assign(ctx.state_in.body_q, ctx.body_q)
-            spatial_assign(ctx.state_in.body_qd, ctx.body_qd)
+            # transform_assign(ctx.state_in.body_q, ctx.body_q)
+            # spatial_assign(ctx.state_in.body_qd, ctx.body_qd)
+            # eval_FK and eval_IK together break body integration due to small errors in
+            # revolute joints, therefore DO NOT call in forward pass
             # wp.sim.eval_fk(ctx.model, ctx.model.joint_q, ctx.model.joint_qd, None, state_in)
             for _ in range(substeps - 1):
                 state_in.clear_forces()
@@ -127,8 +138,11 @@ class IntegratorSimulate(torch.autograd.Function):
             state_in.clear_forces()
             # updates joint_q joint_qd
             ctx.state_out = integrator.simulate(ctx.model, state_in, state_out, dt / float(substeps), requires_grad=True)
-            # ctx.state_out = state_temp
+            # TODO: Check if calling collide after running substeps is correct
+            if ctx.model.ground:
+                wp.sim.collide(ctx.model, ctx.state_out)
             wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
+
 
         joint_q_end = wp.to_torch(ctx.joint_q_end)
         joint_qd_end = wp.to_torch(ctx.joint_qd_end)
@@ -147,12 +161,12 @@ class IntegratorSimulate(torch.autograd.Function):
 
         ctx.tape.backward()
         joint_act_grad = wp.to_torch(ctx.tape.gradients[ctx.act]).clone()
+        # Unnecessary copying of grads, grads should already be recorded by context
         body_q_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_q]).clone()
         body_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_qd]).clone()
-        # print(f"joint_act_grad, {joint_act_grad}")
-        # print(f"body_q_grad, {body_q_grad}")
-        # print(f"body_qd_grad, {body_qd_grad}")
-        
+        ctx.body_q.grad = wp.from_torch(body_q_grad)
+        ctx.body_qd.grad = wp.from_torch(body_qd_grad)
+
         ctx.tape.zero()
         # return adjoint w.r.t. inputs
         return (None, None, None, None, None, joint_act_grad, body_q_grad, body_qd_grad, None)
