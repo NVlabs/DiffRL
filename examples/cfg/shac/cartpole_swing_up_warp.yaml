@@ -17,8 +17,8 @@ params:
 
   config:
     name: warp_cartpole_swing_up_shac
-    actor_learning_rate: 1e-3 # adam
-    critic_learning_rate: 1e-2 # adam
+    actor_learning_rate: 1e-2 # adam
+    critic_learning_rate: 1e-3 # adam
     lr_schedule: linear # ['constant', 'linear']
     target_critic_alpha: 0.6
     obs_rms: True

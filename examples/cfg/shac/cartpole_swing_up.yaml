@@ -1,4 +1,4 @@
-params:  
+params:
   diff_env:
     name: CartPoleSwingUpEnv
     stochastic_env: True
@@ -18,8 +18,8 @@ params:
 
   config:
     name: df_cartpole_swing_up_shac
-    actor_learning_rate: 1e-2 # adam
-    critic_learning_rate: 1e-3 # adam
+    actor_learning_rate: 1e-3 # adam
+    critic_learning_rate: 1e-2 # adam
     lr_schedule: linear # ['constant', 'linear']
     target_critic_alpha: 0.2
     obs_rms: True

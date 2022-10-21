@@ -14,8 +14,8 @@ import time
 import torch
 import random
 
-import envs
-from utils.common import seeding
+from shac import envs
+from shac.utils.common import seeding
 
 import argparse
 
@@ -44,11 +44,13 @@ def test_gradcheck_zero_ac(args, num_steps):
  
     def test_fn(actions, plot=False):
         ob_vec = []
-        ob_vec.append(env.reset().detach().cpu().numpy().flatten())
+        obs = env.reset()
+        ob_vec.append(obs.detach().cpu().numpy().flatten())
         ret = 0
         for _ in range(num_steps):
-            obs, r, done, info = env.step(actions)
             print(obs)
+            obs, r, done, info = env.step(actions)
+            assert obs.requires_grad, "obs should require grad"
             ob_vec.append(obs.detach().cpu().numpy().flatten())
             ret = r + ret * 0.999
         return r  
@@ -75,11 +77,13 @@ def test_gradcheck_rand_ac(args, num_steps):
 
         env = env_fn(**env_fn_kwargs)
         ob_vec = []
-        ob_vec.append(env.reset().detach().cpu().numpy().flatten())
+        obs = env.reset()
+        ob_vec.append(obs.detach().cpu().numpy().flatten())
         ret = 0
         for _ in range(num_steps):
-            obs, r, done, info = env.step(actions)
             print(obs)
+            obs, r, done, info = env.step(actions)
+            assert obs.requires_grad, "obs should require grad"
             ob_vec.append(obs.detach().cpu().numpy().flatten())
             ret = r + ret * 0.999
         return r  
@@ -120,14 +124,30 @@ def check_grad(fn, inputs, eps=1e-6, atol=1e-4, rtol=1e-6):
 
 
 def main(args):
-    test_gradcheck_zero_ac(args, 1)
-    print("test_grad: zero action gradcheck passed, num_steps=1")
-    test_gradcheck_rand_ac(args, 1)
-    print("test_grad: rand action gradcheck passed, num_steps=1")
-    test_gradcheck_zero_ac(args, 10)
-    print("test_grad: zero action gradcheck passed, num_steps=10")
-    test_gradcheck_rand_ac(args, 10)
-    print("test_grad: rand action gradcheck passed, num_steps=10")
+    try:
+        test_gradcheck_zero_ac(args, 1)
+    except Exception as e:
+        print("zero action gradcheck failed, num_steps=1, error:", e)
+    else:
+        print("test_grad: zero action gradcheck passed, num_steps=1")
+    try:
+        test_gradcheck_rand_ac(args, 1)
+    except Exception as e:
+        print("rand action gradcheck failed, num_steps=1, error:", e)
+    else:
+        print("test_grad: rand action gradcheck passed, num_steps=1")
+    try:
+        test_gradcheck_zero_ac(args, 5)
+    except Exception as e:
+        print("zero action gradcheck failed, num_steps=5, error:", e)
+    else:
+        print("test_grad: zero action gradcheck passed, num_steps=10")
+    try:
+        test_gradcheck_rand_ac(args, 5)
+    except Exception as e:
+        print("rand action gradcheck failed, num_steps=5, error:", e)
+    else:
+        print("test_grad: rand action gradcheck passed, num_steps=10")
 
 
 if __name__ == "__main__":

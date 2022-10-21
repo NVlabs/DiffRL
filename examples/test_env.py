@@ -16,8 +16,8 @@ import time
 import torch
 import random
 
-import envs
-from utils.common import seeding
+from shac import envs
+from shac.utils.common import seeding
 
 import argparse
 

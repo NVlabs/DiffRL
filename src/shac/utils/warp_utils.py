@@ -1,7 +1,7 @@
-import warp as wp
 import numpy as np
 import torch
-import pdb
+import warp as wp
+
 
 @wp.kernel
 def assign_kernel(
