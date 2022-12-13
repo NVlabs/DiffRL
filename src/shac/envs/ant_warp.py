@@ -5,7 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from envs.dflex_env import DFlexEnv
+from .warp_env import WarpEnv
 import math
 import torch
 
@@ -13,7 +13,8 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import dflex as df
+import warp as wp
+import warp.sim.render
 
 import numpy as np
 np.set_printoptions(precision=5, linewidth=256, suppress=True)
@@ -23,19 +24,18 @@ try:
 except ModuleNotFoundError:
     print("No pxr package")
 
-from utils import load_utils as lu
 from utils import torch_utils as tu
+from torch.warp_utils import check_grads, IntegratorSimulate
 
 
-class AntEnv(DFlexEnv):
+class AntWarpEnv(WarpEnv):
 
-    def __init__(self, render=False, device='cuda:0', num_envs=4096, seed=0, episode_length=1000, no_grad=True, stochastic_init=False, MM_caching_frequency = 1, early_termination = True):
+    def __init__(self, render=False, device='cuda', num_envs=4096, seed=0, episode_length=1000, no_grad=True, stochastic_init=False, early_termination = True):
         num_obs = 37
         num_act = 8
     
-        super(AntEnv, self).__init__(num_envs, num_obs, num_act, episode_length, MM_caching_frequency, seed, no_grad, render, device)
+        super(AntWarpEnv, self).__init__(num_envs, num_obs, num_act, episode_length, seed, no_grad, render, stochastic_init, device)
 
-        self.stochastic_init = stochastic_init
         self.early_termination = early_termination
 
         self.init_sim()
@@ -48,17 +48,17 @@ class AntEnv(DFlexEnv):
 
         #-----------------------
         # set up Usd renderer
-        if (self.visualize):
-            self.stage = Usd.Stage.CreateNew("outputs/" + "Ant_" + str(self.num_envs) + ".usd")
-
-            self.renderer = df.render.UsdRenderer(self.model, self.stage)
-            self.renderer.draw_points = True
-            self.renderer.draw_springs = True
-            self.renderer.draw_shapes = True
+        if self.visualize:
+            stage_path = "outputs/" + "Ant_" + str(self.num_envs) + ".usd"
+            self.stage = wp.sim.render.SimRenderer(self.model, stage_path)
+            self.stage.draw_points = True
+            self.stage.draw_springs = True
+            self.stage.draw_shapes = True
             self.render_time = 0.0
 
     def init_sim(self):
-        self.builder = df.sim.ModelBuilder()
+        self.builder = wp.sim.ModelBuilder()
+        self.articulation_builder = wp.sim.ModelBuilder()
 
         self.dt = 1.0/60.0
         self.sim_substeps = 16
@@ -73,7 +73,7 @@ class AntEnv(DFlexEnv):
         self.y_unit_tensor = tu.to_torch([0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat((self.num_envs, 1))
         self.z_unit_tensor = tu.to_torch([0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False).repeat((self.num_envs, 1))
 
-        self.start_rot = df.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi*0.5)
+        self.start_rot = wp.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi*0.5)
         self.start_rotation = tu.to_torch(self.start_rot, device=self.device, requires_grad=False)
 
         # initialize some data used later on
@@ -88,8 +88,8 @@ class AntEnv(DFlexEnv):
         self.targets = tu.to_torch([10000.0, 0.0, 0.0], device=self.device, requires_grad=False).repeat((self.num_envs, 1))
 
         self.start_pos = []
-        self.start_joint_q = [0.0, 1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0]
-        self.start_joint_target = [0.0, 1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0]
+        self.start_joint_q = torch.tensor([0.0, 1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0], device=self.device)
+        self.start_joint_target = torch.tensor([0.0, 1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0], device=self.device)
 
         if self.visualize:
             self.env_dist = 2.5
@@ -99,19 +99,19 @@ class AntEnv(DFlexEnv):
         start_height = 0.75
 
         asset_folder = os.path.join(os.path.dirname(__file__), 'assets')
+        wp.sim.parse_mjcf(os.path.join(asset_folder, "ant.xml"), self.articulation_builder,
+                          density=1000.0,
+                          stiffness=0.0,
+                          damping=1.0,
+                          contact_ke=4.e+4,
+                          contact_kd=1.e+4,
+                          contact_kf=3.e+3,
+                          contact_mu=0.75,
+                          limit_ke=1.e+3,
+                          limit_kd=1.e+1,
+                          armature=0.05)
         for i in range(self.num_environments):
-            lu.parse_mjcf(os.path.join(asset_folder, "ant.xml"), self.builder,
-                density=1000.0,
-                stiffness=0.0,
-                damping=1.0,
-                contact_ke=4.e+4,
-                contact_kd=1.e+4,
-                contact_kf=3.e+3,
-                contact_mu=0.75,
-                limit_ke=1.e+3,
-                limit_kd=1.e+1,
-                armature=0.05)
-
+            self.builder.add_rigid_articulation(self.articulation_builder)
             # base transform
             start_pos_z = i*self.env_dist
             self.start_pos.append([0.0, start_height, start_pos_z])
@@ -130,9 +130,9 @@ class AntEnv(DFlexEnv):
         # finalize model
         self.model = self.builder.finalize(self.device)
         self.model.ground = self.ground
-        self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float32, device=self.device)
+        # self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float32, device=self.device)
 
-        self.integrator = df.sim.SemiImplicitIntegrator()
+        self.integrator = wp.sim.SemiImplicitIntegrator()
 
         self.state = self.model.state()
 
@@ -152,6 +152,69 @@ class AntEnv(DFlexEnv):
                     print("USD save error")
 
                 self.num_frames -= render_interval
+    def step(self, actions):
+        with wp.ScopedTimer("simulate", active=False, detailed=False):
+            actions = torch.clip(actions, -1.0, 1.0)
+            self.actions = actions.view(self.num_envs, -1)
+            joint_act = self.action_strength * actions
+
+            requires_grad = not self.no_grad
+            if not self.no_grad:
+                body_q = wp.to_torch(self.state.body_q)  # cut off grad to prev timestep?
+                body_qd = wp.to_torch(self.state.body_qd)  # cut off grad to prev timestep?
+                body_q.requires_grad = requires_grad
+                body_qd.requires_grad = requires_grad
+                state_out = self.model.state(requires_grad=requires_grad)
+                self.joint_q, self.joint_qd, self.state = IntegratorSimulate.apply(
+                    self.model,
+                    self.state,
+                    self.integrator,
+                    self.sim_dt,
+                    self.sim_substeps,
+                    joint_act,
+                    body_q,
+                    body_qd,
+                    state_out,
+                )
+            else:
+                for i in range(self.sim_substeps):
+                    state_out = self.model.state(requires_grad=requires_grad)
+                    self.state = self.integrator.simulate(self.model,
+                                                          self.state, state_out,
+                                                          self.sim_dt / float(self.sim_substeps)
+                    )
+                joint_q = wp.zeros_like(self.model.joint_q)
+                joint_qd = wp.zeros_like(self.model.joint_qd)
+                wp.sim.eval_ik(self.model, self.state, joint_q, joint_qd)
+                self.joint_q, self.joint_qd = wp.to_torch(joint_q), wp.to_torch(joint_qd)
+
+            self.sim_time += self.sim_dt
+
+        self.reset_buf = torch.zeros_like(self.reset_buf)
+
+        self.progress_buf += 1
+        self.num_frames += 1
+
+        self.calculateObservations()
+        self.calculateReward()
+
+        if self.no_grad == False:
+            self.obs_buf_before_reset = self.obs_buf.clone()
+            self.extras = {
+                "obs_before_reset": self.obs_buf_before_reset,
+                "episode_end": self.termination_buf,
+            }
+
+        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+
+        with wp.ScopedTimer("reset", active=False, detailed=False):
+            if len(env_ids) > 0:
+                self.reset(env_ids)
+
+        with wp.ScopedTimer("render", active=False, detailed=False):
+            self.render()
+
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def step(self, actions):
         actions = actions.view((self.num_envs, self.num_actions))
@@ -161,7 +224,7 @@ class AntEnv(DFlexEnv):
         self.actions = actions.clone()
 
         self.state.joint_act.view(self.num_envs, -1)[:, 6:] = actions * self.action_strength
-        
+
         self.state = self.integrator.forward(self.model, self.state, self.sim_dt, self.sim_substeps, self.MM_caching_frequency)
         self.sim_time += self.sim_dt
 
@@ -188,7 +251,15 @@ class AntEnv(DFlexEnv):
         self.render()
 
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
-    
+
+    def get_stochastic_init(self, env_ids, joint_q, joint_qd):
+        joint_q[env_ids, 0:3] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.
+                angle = (torch.rand(len(env_ids), device = self.device) - 0.5) * np.pi / 12.
+                axis = torch.nn.functional.normalize(torch.rand((len(env_ids), 3), device = self.device) - 0.5)
+                self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = tu.quat_mul(self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7], tu.quat_from_angle_axis(angle, axis))
+                self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] + 0.2 * (torch.rand(size=(len(env_ids), self.num_joint_q - 7), device = self.device) - 0.5) * 2.
+                self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (torch.rand(size=(len(env_ids), 14), device=self.device) - 0.5)
+
     def reset(self, env_ids = None, force_reset = True):
         if env_ids is None:
             if force_reset == True:
@@ -196,8 +267,8 @@ class AntEnv(DFlexEnv):
 
         if env_ids is not None:
             # clone the state to avoid gradient error
-            self.state.joint_q = self.state.joint_q.clone()
-            self.state.joint_qd = self.state.joint_qd.clone()
+            self.model.joint_q.assign(wp.to_torch(self.model.joint_q.)
+            self.model.joint_qd = self.model.joint_qd.clone()
 
             # fixed start state
             self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.start_pos[env_ids, :].clone()
@@ -207,12 +278,7 @@ class AntEnv(DFlexEnv):
 
             # randomization
             if self.stochastic_init:
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.
-                angle = (torch.rand(len(env_ids), device = self.device) - 0.5) * np.pi / 12.
-                axis = torch.nn.functional.normalize(torch.rand((len(env_ids), 3), device = self.device) - 0.5)
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = tu.quat_mul(self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7], tu.quat_from_angle_axis(angle, axis))
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] + 0.2 * (torch.rand(size=(len(env_ids), self.num_joint_q - 7), device = self.device) - 0.5) * 2.
-                self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (torch.rand(size=(len(env_ids), 14), device=self.device) - 0.5)
+
 
             # clear action
             self.actions = self.actions.clone()

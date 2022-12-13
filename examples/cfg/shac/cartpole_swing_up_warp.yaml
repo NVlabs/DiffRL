@@ -1,9 +1,8 @@
 params:
   diff_env:
-    name: CartPoleSwingUpEnv
+    name: CartPoleSwingUpWarpEnv
     stochastic_env: True
     episode_length: 240
-    MM_caching_frequency: 4
 
   network:
     actor: ActorStochasticMLP #ActorDeterministicMLP
@@ -17,11 +16,11 @@ params:
       activation: elu
 
   config:
-    name: df_cartpole_swing_up_shac
-    actor_learning_rate: 1e-3 # adam
-    critic_learning_rate: 1e-2 # adam
+    name: warp_cartpole_swing_up_shac
+    actor_learning_rate: 1e-2 # adam
+    critic_learning_rate: 1e-3 # adam
     lr_schedule: linear # ['constant', 'linear']
-    target_critic_alpha: 0.2
+    target_critic_alpha: 0.6
     obs_rms: True
     ret_rms: False
     critic_iterations: 16

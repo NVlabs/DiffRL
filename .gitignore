@@ -1,0 +1,13 @@
+**__pycache__/
+**.ipynb_checkpoints/
+*outputs/
+*.swp
+*.swo
+tags
+
+dflex/dflex/kernels*/
+**logs/
+
+**data/
+**.egg-info/
+
