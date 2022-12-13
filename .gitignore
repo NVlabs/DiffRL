@@ -5,8 +5,9 @@
 *.swo
 tags
 
-dflex/dflex/kernels/
+dflex/dflex/kernels*/
 **logs/
 
 **data/
 **.egg-info/
+

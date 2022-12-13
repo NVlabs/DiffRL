@@ -2,7 +2,7 @@ params:
   diff_env:
     name: ClawWarpEnv
     stochastic_env: True
-    episode_length: 1000
+    episode_length: 500
     MM_caching_frequency: 16
 
   algo:

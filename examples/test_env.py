@@ -33,7 +33,7 @@ def main(args):
         render=args.render,
         seed=0,
         stochastic_init=False,
-        no_grad=False,
+        no_grad=True,
     )
     if issubclass(env_fn, envs.DFlexEnv):
         env_fn_kwargs["MM_caching_frequency"] = 1
@@ -50,14 +50,14 @@ def main(args):
     t_start = time.time()
 
     reward_episode = 0.0
-    observations = np.load('data/observations.npy')
+    observations = np.load("data/observations.npy")
     # acts = np.load('data/acts.npy')
     for i in range(1000):
         actions = torch.rand((args.num_envs, num_actions), device="cuda")
         # act = actions.cpu().numpy()
         # assert np.isclose(acts[i], act).all(), f"expected {acts[i]} got {act}"
         obs, reward, done, info = env.step(actions)
-        assert obs.requires_grad, "obs should require grad"
+        # assert obs.requires_grad, "obs should require grad"
         o = obs[:1].detach().cpu().numpy()
         # assert np.isclose(o, observations[i]).all(), f"expected {observations[i]} got {o}"
         # observations.append(obs[:1].detach().cpu().numpy())

@@ -1,7 +1,10 @@
 import numpy as np
 import torch
 import warp as wp
+from warp.sim.utils import quat_decompose, quat_twist
 
+
+PI = wp.constant(np.pi)
 
 @wp.kernel
 def assign_kernel(
@@ -85,6 +88,112 @@ def spatial_assign(a, b):
     )
     return a
 
+@wp.func
+def compute_joint_q(
+        X_wp: wp.transform,
+        X_wc: wp.transform,
+        axis: wp.vec3,
+        rotation_count: float):
+
+    # child transform and moment arm
+    q_p = wp.transform_get_rotation(X_wp)
+    q_c = wp.transform_get_rotation(X_wc)
+    # angular error pos
+    r_err = wp.quat_inverse(q_p) * q_c
+
+    # swing twist decomposition
+    twist = quat_twist(axis, r_err)
+
+    q = (
+        wp.acos(twist[3])
+        * 2.0
+        * wp.sign(wp.dot(axis, wp.vec3(twist[0], twist[1], twist[2])))
+    ) + 4.0 * PI * rotation_count
+    return q
+
+
+@wp.func
+def compute_joint_qd(
+        X_wp: wp.transform,
+        X_wc: wp.transform,
+        w_p: wp.vec3,
+        w_c: wp.vec3,
+        axis: wp.vec3,
+        ):
+    axis_p = wp.transform_vector(X_wp, axis)
+    # angular error vel
+    w_err = w_c - w_p
+    qd = wp.dot(w_err, axis_p)
+    return qd
+
+
+@wp.kernel
+def get_joint_q(
+        body_q: wp.array(dtype=wp.transform),
+        joint_type: wp.array(dtype=int),
+        joint_parent: wp.array(dtype=int),
+        joint_X_p: wp.array(dtype=wp.transform),
+        joint_axis: wp.array(dtype=wp.vec3),
+        joint_rotation_count: float,
+        # outputs
+        joint_q: wp.array(dtype=float)):
+
+    tid = wp.tid()
+    type = joint_type[tid]
+    axis = joint_axis[tid]
+
+    if type != wp.sim.JOINT_REVOLUTE_TIGHT and type != wp.sim.JOINT_REVOLUTE:
+        return
+
+    c_child = tid
+    c_parent = joint_parent[tid]
+    X_wp = joint_X_p[tid]
+    X_wc = body_q[c_child]
+
+    if c_parent >= 0:
+        X_wp = body_q[c_parent] * X_wp
+
+    q = compute_joint_q(X_wp, X_wc, axis, joint_rotation_count)
+    joint_q[0] = q
+
+
+@wp.kernel
+def get_joint_qd(
+        body_q: wp.array(dtype=wp.transform),
+        body_qd: wp.array(dtype=wp.spatial_vector),
+        joint_qd_start: wp.array(dtype=int),
+        joint_type: wp.array(dtype=int),
+        joint_parent: wp.array(dtype=int),
+        joint_X_p: wp.array(dtype=wp.transform),
+        joint_axis: wp.array(dtype=wp.vec3),
+        # outputs
+        joint_qd: wp.array(dtype=float)):
+
+    tid = wp.tid()
+    type = joint_type[tid]
+    qd_start = joint_qd_start[tid]
+    axis = joint_axis[tid]
+
+    if type != wp.sim.JOINT_REVOLUTE_TIGHT:
+        return
+
+    c_child = tid
+    c_parent = joint_parent[tid]
+    X_wp = joint_X_p[tid]
+    X_wc = body_q[c_child]
+    w_p = wp.vec3()  # is zero if parent is root
+    w_c = wp.spatial_top(body_qd[c_child])
+
+    if c_parent >= 0:
+        X_wp = body_q[c_parent] * X_wp
+        twist_p = body_qd[c_parent]
+        w_p = wp.spatial_top(twist_p)
+
+    qd = compute_joint_qd(X_wp, X_wc, w_p, w_c, axis)
+
+    joint_qd[0] = qd
+
+
 class IntegratorSimulate(torch.autograd.Function):
     @staticmethod
     def forward(ctx,
@@ -141,9 +250,33 @@ class IntegratorSimulate(torch.autograd.Function):
             # TODO: Check if calling collide after running substeps is correct
             if ctx.model.ground:
                 wp.sim.collide(ctx.model, ctx.state_out)
-            wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
+            # wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
 
-
+            wp.launch(kernel=get_joint_q,
+                      dim=model.joint_count,
+                      device=model.device,
+                      inputs=[
+                          ctx.state_out.body_q,
+                          model.joint_type,
+                          model.joint_parent,
+                          model.joint_X_p,
+                          model.joint_axis,
+                          0.
+                      ],
+                      outputs=[ctx.joint_q_end])
+            wp.launch(kernel=get_joint_qd,
+                      dim=model.joint_count,
+                      device=model.device,
+                      inputs=[
+                          ctx.state_out.body_q,
+                          ctx.state_out.body_qd,
+                          model.joint_qd_start,
+                          model.joint_type,
+                          model.joint_parent,
+                          model.joint_X_p,
+                          model.joint_axis,
+                      ],
+                      outputs=[ctx.joint_qd_end])
         joint_q_end = wp.to_torch(ctx.joint_q_end)
         joint_qd_end = wp.to_torch(ctx.joint_qd_end)
         return (

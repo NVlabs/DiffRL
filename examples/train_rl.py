@@ -5,28 +5,13 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import sys, os
-
-project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.append(project_dir)
-
-from rl_games.common import env_configurations, experiment, vecenv
-from rl_games.common.algo_observer import AlgoObserver
+from rl_games.common import env_configurations, vecenv
 from rl_games.torch_runner import Runner
-from rl_games.algos_torch import torch_ext
-
-import argparse
-
-import envs
-import os
-import sys
 import yaml
 
-import numpy as np
-import copy
-import torch
-
-from utils.common import *
+from gym import wrappers
+from shac import envs
+from shac.utils.common import *
 
 
 def create_dflex_env(**kwargs):

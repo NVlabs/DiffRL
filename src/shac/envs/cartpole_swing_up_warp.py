@@ -11,7 +11,7 @@ import sys
 
 import torch
 
-from .warp_env import WarpEnv
+from dmanip.envs import WarpEnv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -47,7 +47,15 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         num_act = 1
 
         super(CartPoleSwingUpWarpEnv, self).__init__(
-            num_envs, num_obs, num_act, episode_length, seed, no_grad, render, stochastic_init, device
+            num_envs,
+            num_obs,
+            num_act,
+            episode_length,
+            seed,
+            no_grad,
+            render,
+            stochastic_init,
+            device,
         )
 
         self.early_termination = early_termination
@@ -64,14 +72,16 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.cart_position_penalty = 0.05
         self.cart_velocity_penalty = 0.1
 
-        self.cart_action_penalty = 0.
+        self.cart_action_penalty = 0.0
 
         # -----------------------
         # set up Usd renderer
         if self.visualize:
             stage_path = f"outputs/CartPoleSwingUpWarp_{self.num_envs}.usd"
             print(f"created stage, {stage_path}")
-            self.stage = wp.sim.render.SimRenderer(self.model, stage_path)
+            self.stage = wp.sim.render.SimRenderer(
+                self.model, stage_path, scaling=100.0
+            )
             self.stage.draw_points = True
             self.stage.draw_springs = True
             self.stage.draw_shapes = True
@@ -124,7 +134,9 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                 ),
             )
             self.builder.joint_q[i * self.num_joint_q + 1] = -math.pi
-            self.builder.joint_target[i * self.num_joint_q:(i+1) * self.num_joint_q] = [0., 0.]
+            self.builder.joint_target[
+                i * self.num_joint_q : (i + 1) * self.num_joint_q
+            ] = [0.0, 0.0]
 
         self.model = self.builder.finalize(str(self.device))
         self.model.ground = False
@@ -166,11 +178,17 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
             requires_grad = not self.no_grad
             if not self.no_grad:
-                body_q = wp.to_torch(self.state.body_q)  # does this cut off grad to prev timestep?
-                body_qd = wp.to_torch(self.state.body_qd)  # does this cut off grad to prev timestep?
+                body_q = wp.to_torch(
+                    self.state.body_q
+                )  # does this cut off grad to prev timestep?
+                body_qd = wp.to_torch(
+                    self.state.body_qd
+                )  # does this cut off grad to prev timestep?
                 body_q.requires_grad = requires_grad
                 body_qd.requires_grad = requires_grad
-                assert self.model.body_q.requires_grad and self.state.body_q.requires_grad
+                assert (
+                    self.model.body_q.requires_grad and self.state.body_q.requires_grad
+                )
                 state_out = self.model.state(requires_grad=requires_grad)
                 self.joint_q, self.joint_qd, self.state = IntegratorSimulate.apply(
                     self.model,
@@ -186,14 +204,18 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             else:
                 for i in range(self.sim_substeps):
                     state_out = self.model.state(requires_grad=requires_grad)
-                    self.state = self.integrator.simulate(self.model,
-                                                          self.state, state_out,
-                                                          self.sim_dt / float(self.sim_substeps)
+                    self.state = self.integrator.simulate(
+                        self.model,
+                        self.state,
+                        state_out,
+                        self.sim_dt / float(self.sim_substeps),
                     )
                 joint_q = wp.zeros_like(self.model.joint_q)
                 joint_qd = wp.zeros_like(self.model.joint_qd)
                 wp.sim.eval_ik(self.model, self.state, joint_q, joint_qd)
-                self.joint_q, self.joint_qd = wp.to_torch(joint_q), wp.to_torch(joint_qd)
+                self.joint_q, self.joint_qd = wp.to_torch(joint_q), wp.to_torch(
+                    joint_qd
+                )
 
             self.sim_time += self.sim_dt
 
@@ -225,23 +247,17 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
     def get_stochastic_init(self, env_ids, joint_q, joint_qd):
         rand_init_q = np.pi * (
-                    torch.rand(
-                        size=(len(env_ids), self.num_joint_q), device=self.device
-                    )
-                    - 0.5
-                )
+            torch.rand(size=(len(env_ids), self.num_joint_q), device=self.device) - 0.5
+        )
         rand_init_qd = 0.5 * (
-                    torch.rand(
-                        size=(len(env_ids), self.num_joint_qd), device=self.device
-                    )
-                    - 0.5
-                )
+            torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5
+        )
         joint_q[env_ids] += rand_init_q
         joint_qd[env_ids] += rand_init_qd
         return joint_q, joint_qd
 
     def initialize_trajectory(self):
-        """ initialize_trajectory() starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.
+        """initialize_trajectory() starts collecting a new trajectory from the current states but cut off the computation graph to the previous states.
         It has to be called every time the algorithm starts an episode and return the observation vectors
         """
         self.clear_grad()
@@ -259,7 +275,9 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
                 self.model.body_qd.requires_grad = True
                 self.state.body_q.requires_grad = True
                 self.state.body_qd.requires_grad = True
-        joint_q, joint_qd = self.joint_q.view(self.num_envs, -1), self.joint_qd.view(self.num_envs, -1)
+        joint_q, joint_qd = self.joint_q.view(self.num_envs, -1), self.joint_qd.view(
+            self.num_envs, -1
+        )
 
         x = joint_q[:, 0:1]
         theta = joint_q[:, 1:2]

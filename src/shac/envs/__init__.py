@@ -9,9 +9,10 @@ from .ant import AntEnv
 from .cartpole_swing_up import CartPoleSwingUpEnv
 from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
 from .cheetah import CheetahEnv
-from .claw_env import ClawWarpEnv
 from .dflex_env import DFlexEnv
 from .hopper import HopperEnv
 from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
-from .warp_env import WarpEnv
+
+# dmanip envs
+from dmanip.envs import WarpEnv, ClawWarpEnv
