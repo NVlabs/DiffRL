@@ -68,8 +68,8 @@ for i in range(len(seeds)):
         "python {} "
         "--cfg {} "
         "--seed {} "
-        "--logdir {} "
-        "--no-time-stamp ".format(script_name, config_path, seed, save_dir)
+        "--logdir {} ".format(script_name, config_path, seed, save_dir)
+        # "--no-time-stamp ".format(script_name, config_path, seed, save_dir)
     )
 
     commands.append(cmd)

@@ -12,6 +12,7 @@ import yaml
 from gym import wrappers
 from shac import envs
 from shac.utils.common import *
+from dmanip.envs.claw_env import GoalType, ActionType, ObjectType
 
 
 def create_dflex_env(**kwargs):
@@ -40,8 +41,24 @@ def create_dflex_env(**kwargs):
     return env
 
 
+def parse_diff_env_kwargs(diff_env):
+    env_kwargs = {}
+    for key, value in diff_env.items():
+        if key in ["name", "episode_length", "stochastic_env"]:
+            continue
+        if key == "goal_type":
+            env_kwargs["goal_type"] = GoalType(value)
+        if key == "action_type":
+            env_kwargs["action_type"] = ActionType(value)
+        if key == "object_type":
+            env_kwargs["object_type"] = ObjectType(value)
+    print("parsed kwargs:", env_kwargs)
+    return env_kwargs
+
+
 def create_warp_env(**kwargs):
     env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
+    env_kwargs = parse_diff_env_kwargs(cfg_train["params"]["diff_env"])
 
     env = env_fn(
         num_envs=cfg_train["params"]["config"]["num_actors"],
@@ -50,6 +67,7 @@ def create_warp_env(**kwargs):
         episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
         no_grad=True,
         stochastic_init=cfg_train["params"]["diff_env"]["stochastic_env"],
+        **env_kwargs,
     )
 
     print("num_envs = ", env.num_envs)
