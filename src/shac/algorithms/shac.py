@@ -14,23 +14,19 @@ project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
 
 import time
-import numpy as np
 import copy
-import torch
 from tensorboardX import SummaryWriter
 import yaml
 
-import dflex as df
-
-import envs
-import models.actor
-import models.critic
-from utils.common import *
-import utils.torch_utils as tu
-from utils.running_mean_std import RunningMeanStd
-from utils.dataset import CriticDataset
-from utils.time_report import TimeReport
-from utils.average_meter import AverageMeter
+from shac import envs
+from shac import models.actor
+from shac import models.critic
+from shac.utils.common import *
+import shac.utils.torch_utils as tu
+from shac.utils.running_mean_std import RunningMeanStd
+from shac.utils.dataset import CriticDataset
+from shac.utils.time_report import TimeReport
+from shac.utils.average_meter import AverageMeter
 
 
 class SHAC:

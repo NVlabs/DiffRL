@@ -4,6 +4,8 @@ params:
     stochastic_env: True
     episode_length: 500
     MM_caching_frequency: 16
+    goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
+    action_type: 1 # 0: position, 1: torque
 
   algo:
     name: a2c_continuous
