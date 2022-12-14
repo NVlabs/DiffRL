@@ -89,7 +89,7 @@ class RLGPUEnv(vecenv.IVecEnv):
 
         self.full_state = {}
 
-        self.rl_device = "cuda:0"
+        self.rl_device = args.rl_device
 
         self.full_state["obs"] = self.env.reset(force_reset=True).to(self.rl_device)
         print(self.full_state["obs"].shape)

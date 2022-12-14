@@ -19,8 +19,8 @@ from tensorboardX import SummaryWriter
 import yaml
 
 from shac import envs
-from shac import models.actor
-from shac import models.critic
+import shac.models.actor as actor_models
+import shac.models.critic as critic_models
 from shac.utils.common import *
 import shac.utils.torch_utils as tu
 from shac.utils.running_mean_std import RunningMeanStd
@@ -127,11 +127,11 @@ class SHAC:
             "actor", "ActorStochasticMLP"
         )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
         self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
-        actor_fn = getattr(models.actor, self.actor_name)
+        actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
         )
-        critic_fn = getattr(models.critic, self.critic_name)
+        critic_fn = getattr(critic_models, self.critic_name)
         self.critic = critic_fn(
             self.num_obs, cfg["params"]["network"], device=self.device
         )

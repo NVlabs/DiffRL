@@ -11,3 +11,4 @@ dflex/dflex/kernels*/
 **data/
 **.egg-info/
 
+wandb/
