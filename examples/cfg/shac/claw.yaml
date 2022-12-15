@@ -2,7 +2,7 @@ params:
   diff_env:
     name: ClawWarpEnv
     stochastic_env: True
-    episode_length: 60
+    episode_length: 500
     MM_caching_frequency: 16
     goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
     action_type: 1 # 0: position, 1: torque
@@ -33,7 +33,7 @@ params:
     gamma: 0.99
     betas: [0.7, 0.95] # adam
     max_epochs: 2000
-    steps_num: 8
+    steps_num: 16
     grad_norm: 1.0
     truncate_grads: True
     num_actors: 32

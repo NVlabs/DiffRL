@@ -5,7 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from .warp_env import WarpEnv
+from dmanip.envs import WarpEnv
 import math
 import torch
 
@@ -267,7 +267,7 @@ class AntWarpEnv(WarpEnv):
 
         if env_ids is not None:
             # clone the state to avoid gradient error
-            self.model.joint_q.assign(wp.to_torch(self.model.joint_q.)
+            self.model.joint_q.assign(wp.to_torch(self.model.joint_q.))
             self.model.joint_qd = self.model.joint_qd.clone()
 
             # fixed start state
@@ -278,7 +278,6 @@ class AntWarpEnv(WarpEnv):
 
             # randomization
             if self.stochastic_init:
-
 
             # clear action
             self.actions = self.actions.clone()
