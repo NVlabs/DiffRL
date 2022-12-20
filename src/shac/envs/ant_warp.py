@@ -253,12 +253,16 @@ class AntWarpEnv(WarpEnv):
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_stochastic_init(self, env_ids, joint_q, joint_qd):
-        joint_q[env_ids, 0:3] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.
-                angle = (torch.rand(len(env_ids), device = self.device) - 0.5) * np.pi / 12.
-                axis = torch.nn.functional.normalize(torch.rand((len(env_ids), 3), device = self.device) - 0.5)
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = tu.quat_mul(self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7], tu.quat_from_angle_axis(angle, axis))
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] = self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] + 0.2 * (torch.rand(size=(len(env_ids), self.num_joint_q - 7), device = self.device) - 0.5) * 2.
-                self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (torch.rand(size=(len(env_ids), 14), device=self.device) - 0.5)
+        joint_q[env_ids, 0:3] = joint_q[env_ids, 0:3] + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.
+        angle = (torch.rand(len(env_ids), device=self.device) - 0.5) * np.pi / 12.
+        axis = torch.nn.functional.normalize(torch.rand((len(env_ids), 3), device=self.device) - 0.5)
+        joint_q[env_ids, 3:7] = tu.quat_mul(self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7], tu.quat_from_angle_axis(angle, axis))
+        joint_q[env_ids, 7:] = joint_q[env_ids, 7:] + 0.4 * (
+                torch.rand(size=(len(env_ids), self.num_joint_q - 7),
+                           device=self.device) - 0.5)
+        joint_qd[env_ids, :] = 0.5 * (
+                torch.rand(size=(len(env_ids), 14), device=self.device) - 0.5)
+        return joint_q, joint_qd
 
     def reset(self, env_ids = None, force_reset = True):
         if env_ids is None:
@@ -267,17 +271,16 @@ class AntWarpEnv(WarpEnv):
 
         if env_ids is not None:
             # clone the state to avoid gradient error
-            self.model.joint_q.assign(wp.to_torch(self.model.joint_q.))
-            self.model.joint_qd = self.model.joint_qd.clone()
-
-            # fixed start state
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.start_pos[env_ids, :].clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = self.start_rotation.clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] = self.start_joint_q.clone()
-            self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.
+            joint_q, joint_qd = self.start_joint_q.clone() self.start_joint_qd.clone()
+            joint_q = joint_q.view(self.num_envs, -1)
+            joint_qd = joint_qd.view(self.num_envs, -1)
 
             # randomization
             if self.stochastic_init:
+                joint_q, joint_qd = self.get_stochastic_init(env_ids, joint_q, joint_qd)
+
+            self.model.joint_q.assign(wp.from_torch(joint_q.flatten()))
+            self.model.joint_qd.assign(wp.from_torch(joint_qd.flatten()))
 
             # clear action
             self.actions = self.actions.clone()

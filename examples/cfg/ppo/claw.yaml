@@ -5,6 +5,7 @@ params:
     episode_length: 500
     MM_caching_frequency: 16
     goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
+    object_type: 5  # 0-3 are meshes, 4 - 8 are primitives
     action_type: 1 # 0: position, 1: torque
 
   algo:
@@ -73,6 +74,7 @@ params:
     clip_value: True
     seq_len: 4
     bounds_loss_coef: 0.0001
+    score_keys: ["control_pen", "ftip_err", "q_err", "pos_err", "force_err"]
 
     player:
       determenistic: True

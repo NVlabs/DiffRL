@@ -221,6 +221,11 @@ class SHAC:
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_discounted_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
+        self.score_keys = cfg["params"]["config"].get("score_keys", [])
+        self.episode_scores_meter_map = {
+            key + "_final": AverageMeter(1, 100).to(self.device)
+            for key in self.score_keys
+        }
 
         # timer
         self.time_report = TimeReport()
@@ -359,6 +364,12 @@ class SHAC:
                         self.episode_discounted_loss[done_env_ids]
                     )
                     self.episode_length_meter.update(self.episode_length[done_env_ids])
+                    for k, v in filter(
+                        lambda x: x[0] in self.score_keys, extra_info.items()
+                    ):
+                        self.episode_scores_meter_map[k + "_final"].update(
+                            v[done_env_ids]
+                        )
                     for done_env_id in done_env_ids:
                         if (
                             self.episode_loss[done_env_id] > 1e6
@@ -671,6 +682,21 @@ class SHAC:
                 self.writer.add_scalar(
                     "rewards/iter", -mean_policy_loss, self.iter_count
                 )
+                if (
+                    self.score_keys
+                    and len(self.episode_scores_meter_map[self.score_keys[0]]) > 0
+                ):
+                    for score_key in self.score_keys:
+                        score = self.episode_scores_meter_map[score_key].get_mean()
+                        self.writer.add_scalar(
+                            "scores/{}/iter".format(score_key), score, self.iter_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/step".format(score_key), score, self.step_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/time".format(score_key), score, time_elapse
+                        )
                 self.writer.add_scalar(
                     "policy_discounted_loss/step",
                     mean_policy_discounted_loss,

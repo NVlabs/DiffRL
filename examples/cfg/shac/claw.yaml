@@ -38,6 +38,7 @@ params:
     truncate_grads: True
     num_actors: 32
     save_interval: 400
+    score_keys: ["control_pen", "ftip_err", "q_err", "pos_err", "force_err"]
 
     player:
       determenistic: True
