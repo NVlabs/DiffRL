@@ -112,6 +112,12 @@ def get_args():  # TODO: delve into the arguments
             "default": False,
             "help": "whether generate rendering file.",
         },
+        {
+            "name": "--wandb",
+            "action": "store_true",
+            "default": False,
+            "help": "whether to log with wandb.",
+        },
     ]
 
     # parse arguments
@@ -145,6 +151,17 @@ if __name__ == "__main__":
     cfg_train["params"]["general"] = {}
     for key in vargs.keys():
         cfg_train["params"]["general"][key] = vargs[key]
+
+    if args.wandb:
+        import wandb
+
+        wandb.init(
+            project="dmanip",
+            config=cfg_train["params"],
+            entity="krshna",
+            sync_tensorboard=True,
+            resume="allow",
+        )
 
     traj_optimizer = SHAC(cfg_train)
 
