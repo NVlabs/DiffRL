@@ -303,6 +303,12 @@ def get_args():  # TODO: delve into the arguments
             "default": False,
             "help": "whether not add time stamp at the log path",
         },
+        {
+            "name": "--wandb",
+            "action": "store_true",
+            "default": False,
+            "help": "whether not log with wandb",
+        },
     ]
 
     # parse arguments
@@ -341,6 +347,17 @@ if __name__ == "__main__":
         os.makedirs(log_dir, exist_ok=True)
         # save config
         yaml.dump(cfg_train, open(os.path.join(log_dir, "cfg.yaml"), "w"))
+
+    if args.wandb:
+        import wandb
+
+        wandb.init(
+            project="dmanip",
+            config=cfg_train["params"],
+            entity="krshna",
+            sync_tensorboard=True,
+            resume="allow",
+        )
 
     # add observer to score keys
     if cfg_train["params"]["config"].get("score_keys"):

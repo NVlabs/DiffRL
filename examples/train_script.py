@@ -7,6 +7,7 @@
 
 import os
 import argparse
+from concurrent import futures
 
 configs = {
     "Ant": "ant.yaml",
@@ -68,11 +69,17 @@ for i in range(len(seeds)):
         "python {} "
         "--cfg {} "
         "--seed {} "
+        "--wandb "
+        "--no-time-stamp "
         "--logdir {} ".format(script_name, config_path, seed, save_dir)
         # "--no-time-stamp ".format(script_name, config_path, seed, save_dir)
     )
 
     commands.append(cmd)
 
-for command in commands:
-    os.system(command)
+with futures.ThreadPoolExecutor(max_workers=10) as executor:
+    jobs = [executor.submit(os.system, command) for command in commands]
+    results = [job.result() for job in jobs]
+    if any(results):
+        print(f"jobs: {[i for i, x in enumerate(results) if x]} failed, check the logs")
+    print(sum(job.done() for job in jobs), "jobs done")

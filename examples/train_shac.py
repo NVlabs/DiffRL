@@ -118,6 +118,36 @@ def get_args():  # TODO: delve into the arguments
             "default": False,
             "help": "whether to log with wandb.",
         },
+        {
+            "name": "--c-act",
+            "help": "act penalty coefficient",
+            "type": float,
+            "default": 2e-3,
+        },
+        {
+            "name": "--c-finger",
+            "help": "finger position error coefficient",
+            "type": float,
+            "default": 1.0,
+        },
+        {
+            "name": "--c-q",
+            "help": "object orientation error coefficient",
+            "type": float,
+            "default": 10.0,
+        },
+        {
+            "name": "--c-pos",
+            "help": "object position error coefficient",
+            "type": float,
+            "default": 0.0,
+        },
+        {
+            "name": "--c-ft",
+            "help": "object goal force-torque error coefficient",
+            "type": float,
+            "default": 0.0,
+        },
     ]
 
     # parse arguments
