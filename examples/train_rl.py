@@ -18,31 +18,31 @@ from shac.utils.common import *
 from dmanip.envs.claw_env import GoalType, ActionType, ObjectType
 
 
-def create_dflex_env(**kwargs):
-    env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
-
-    env = env_fn(
-        num_envs=cfg_train["params"]["config"]["num_actors"],
-        render=args.render,
-        seed=args.seed,
-        episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
-        no_grad=True,
-        stochastic_init=cfg_train["params"]["diff_env"]["stochastic_env"],
-        MM_caching_frequency=cfg_train["params"]["diff_env"].get(
-            "MM_caching_frequency", 1
-        ),
-    )
-
-    print("num_envs = ", env.num_envs)
-    print("num_actions = ", env.num_actions)
-    print("num_obs = ", env.num_obs)
-
-    frames = kwargs.pop("frames", 1)
-    if frames > 1:
-        env = wrappers.FrameStack(env, frames, False)
-
-    return env
-
+# def create_dflex_env(**kwargs):
+#     env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
+# 
+#     env = env_fn(
+#         num_envs=cfg_train["params"]["config"]["num_actors"],
+#         render=args.render,
+#         seed=args.seed,
+#         episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
+#         no_grad=True,
+#         stochastic_init=cfg_train["params"]["diff_env"]["stochastic_env"],
+#         MM_caching_frequency=cfg_train["params"]["diff_env"].get(
+#             "MM_caching_frequency", 1
+#         ),
+#     )
+# 
+#     print("num_envs = ", env.num_envs)
+#     print("num_actions = ", env.num_actions)
+#     print("num_obs = ", env.num_obs)
+# 
+#     frames = kwargs.pop("frames", 1)
+#     if frames > 1:
+#         env = wrappers.FrameStack(env, frames, False)
+# 
+#     return env
+# 
 
 def parse_diff_env_kwargs(diff_env):
     env_kwargs = {}
@@ -181,19 +181,19 @@ class RLGPUEnvAlgoObserver(AlgoObserver):
                 )
 
 
-vecenv.register(
-    "DFLEX",
-    lambda config_name, num_actors, **kwargs: RLGPUEnv(
-        config_name, num_actors, **kwargs
-    ),
-)
-env_configurations.register(
-    "dflex",
-    {
-        "env_creator": lambda **kwargs: create_dflex_env(**kwargs),
-        "vecenv_type": "DFLEX",
-    },
-)
+# vecenv.register(
+#     "DFLEX",
+#     lambda config_name, num_actors, **kwargs: RLGPUEnv(
+#         config_name, num_actors, **kwargs
+#     ),
+# )
+# env_configurations.register(
+#     "dflex",
+#     {
+#         "env_creator": lambda **kwargs: create_dflex_env(**kwargs),
+#         "vecenv_type": "DFLEX",
+#     },
+# )
 
 vecenv.register(
     "WARP",

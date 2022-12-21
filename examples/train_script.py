@@ -7,7 +7,15 @@
 
 import os
 import argparse
+import subprocess
 from concurrent import futures
+
+
+def run_subprocess(command):
+    with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE) as proc:
+        with open(f"job-{proc.pid}.txt", "wb") as log:
+            log.write(proc.stdout.read())
+
 
 configs = {
     "Ant": "ant.yaml",
@@ -78,7 +86,7 @@ for i in range(len(seeds)):
     commands.append(cmd)
 
 with futures.ThreadPoolExecutor(max_workers=10) as executor:
-    jobs = [executor.submit(os.system, command) for command in commands]
+    jobs = [executor.submit(run_subprocess, command) for command in commands]
     results = [job.result() for job in jobs]
     if any(results):
         print(f"jobs: {[i for i, x in enumerate(results) if x]} failed, check the logs")
