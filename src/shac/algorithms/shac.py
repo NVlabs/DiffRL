@@ -684,10 +684,15 @@ class SHAC:
                 )
                 if (
                     self.score_keys
-                    and len(self.episode_scores_meter_map[self.score_keys[0]]) > 0
+                    and len(
+                        self.episode_scores_meter_map[self.score_keys[0] + "_final"]
+                    )
+                    > 0
                 ):
                     for score_key in self.score_keys:
-                        score = self.episode_scores_meter_map[score_key].get_mean()
+                        score = self.episode_scores_meter_map[
+                            score_key + "_final"
+                        ].get_mean()
                         self.writer.add_scalar(
                             "scores/{}/iter".format(score_key), score, self.iter_count
                         )
