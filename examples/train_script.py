@@ -12,9 +12,18 @@ from concurrent import futures
 
 
 def run_subprocess(command):
-    with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE) as proc:
-        with open(f"job-{proc.pid}.txt", "wb") as log:
-            log.write(proc.stdout.read())
+    command = command + f"& echo started job $!"
+    with subprocess.Popen(
+        command,
+        shell=True,
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as proc:
+        with open(f"job-{proc.pid}.out", "wb") as out_log:
+            with open(f"job-{proc.pid}.err", "wb") as err_log:
+                out_log.write(proc.stdout.read())
+                err_log.write(proc.stderr.read())
 
 
 configs = {
@@ -85,9 +94,5 @@ for i in range(len(seeds)):
 
     commands.append(cmd)
 
-with futures.ThreadPoolExecutor(max_workers=10) as executor:
-    jobs = [executor.submit(run_subprocess, command) for command in commands]
-    results = [job.result() for job in jobs]
-    if any(results):
-        print(f"jobs: {[i for i, x in enumerate(results) if x]} failed, check the logs")
-    print(sum(job.done() for job in jobs), "jobs done")
+    for command in commands:
+        run_subprocess(command)

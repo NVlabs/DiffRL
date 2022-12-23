@@ -20,7 +20,7 @@ from dmanip.envs.claw_env import GoalType, ActionType, ObjectType
 
 # def create_dflex_env(**kwargs):
 #     env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
-# 
+#
 #     env = env_fn(
 #         num_envs=cfg_train["params"]["config"]["num_actors"],
 #         render=args.render,
@@ -32,17 +32,18 @@ from dmanip.envs.claw_env import GoalType, ActionType, ObjectType
 #             "MM_caching_frequency", 1
 #         ),
 #     )
-# 
+#
 #     print("num_envs = ", env.num_envs)
 #     print("num_actions = ", env.num_actions)
 #     print("num_obs = ", env.num_obs)
-# 
+#
 #     frames = kwargs.pop("frames", 1)
 #     if frames > 1:
 #         env = wrappers.FrameStack(env, frames, False)
-# 
+#
 #     return env
-# 
+#
+
 
 def parse_diff_env_kwargs(diff_env):
     env_kwargs = {}
@@ -169,10 +170,11 @@ class RLGPUEnvAlgoObserver(AlgoObserver):
 
     def after_print_stats(self, frame, epoch_num, total_time):
         super().after_print_stats(frame, epoch_num, total_time)
-        for score_key, score_values in self.mean_scores_map.items():
+        for score_key in self.score_keys:
+            score_values = self.mean_scores_map[score_key + "_final"]
             if score_values.current_size > 0:
                 mean_scores = score_values.get_mean()
-                self.writer.add_scalar(f"scores/{score_key}/mean", mean_scores, frame)
+                self.writer.add_scalar(f"scores/{score_key}/step", mean_scores, frame)
                 self.writer.add_scalar(
                     f"scores/{score_key}/iter", mean_scores, epoch_num
                 )
