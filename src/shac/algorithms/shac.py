@@ -34,12 +34,7 @@ class SHAC:
         env_fn = getattr(envs, cfg["params"]["diff_env"]["name"])
 
         seeding(cfg["params"]["general"]["seed"])
-        dflex_kwargs = {}
-        if cfg["params"]["diff_env"]["name"].lower().find("warp") < 0:
-            dflex_kwargs["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
-                "MM_caching_frequency", 1
-            )
-        self.env = env_fn(
+        config = dict(
             num_envs=cfg["params"]["config"]["num_actors"],
             device=cfg["params"]["general"]["device"],
             render=cfg["params"]["general"]["render"],
@@ -47,8 +42,18 @@ class SHAC:
             episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
             stochastic_init=cfg["params"]["diff_env"].get("stochastic_env", True),
             no_grad=False,
-            **dflex_kwargs
         )
+        config.update(cfg["params"].get("diff_env", {}))
+        if cfg["params"]["diff_env"]["name"].lower().find("warp") < 0:
+            config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
+                "MM_caching_frequency", 1
+            )
+        if cfg["params"]["diff_env"]["name"] == "ClawWarpEnv":
+            from dmanip.config import ClawWarpConfig
+
+            self.env = env_fn(ClawWarpConfig(**config))
+        else:
+            self.env = env_fn(**config)
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
