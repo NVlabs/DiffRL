@@ -31,7 +31,8 @@ from shac.utils.average_meter import AverageMeter
 
 class SHAC:
     def __init__(self, cfg):
-        env_fn = getattr(envs, cfg["params"]["diff_env"]["name"])
+        env_name = cfg["params"]["diff_env"].pop("name")
+        env_fn = getattr(envs, env_name)
 
         seeding(cfg["params"]["general"]["seed"])
         config = dict(
@@ -44,11 +45,11 @@ class SHAC:
             no_grad=False,
         )
         config.update(cfg["params"].get("diff_env", {}))
-        if cfg["params"]["diff_env"]["name"].lower().find("warp") < 0:
+        if env_name.lower().find("warp") < 0:
             config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
                 "MM_caching_frequency", 1
             )
-        if cfg["params"]["diff_env"]["name"] == "ClawWarpEnv":
+        if env_name == "ClawWarpEnv":
             from dmanip.config import ClawWarpConfig
 
             self.env = env_fn(ClawWarpConfig(**config))
