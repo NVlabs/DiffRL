@@ -35,13 +35,17 @@ class SHAC:
         env_fn = getattr(envs, env_name)
 
         seeding(cfg["params"]["general"]["seed"])
+        if "stochastic_env" in cfg["params"]["diff_env"]:
+            stochastic_init = cfg["params"]["diff_env"].pop("stochastic_env")
+        else:
+            stochastic_init = True
         config = dict(
             num_envs=cfg["params"]["config"]["num_actors"],
             device=cfg["params"]["general"]["device"],
             render=cfg["params"]["general"]["render"],
             seed=cfg["params"]["general"]["seed"],
             episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
-            stochastic_init=cfg["params"]["diff_env"].get("stochastic_env", True),
+            stochastic_init=stochastic_init,
             no_grad=False,
         )
         config.update(cfg["params"].get("diff_env", {}))
