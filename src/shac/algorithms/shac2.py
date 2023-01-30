@@ -55,6 +55,11 @@ class SHAC:
             from dmanip.config import ClawWarpConfig
 
             self.env = env_fn(ClawWarpConfig(**config))
+        elif env_name == "AllegroWarpEnv":
+            from dmanip.config import AllegroWarpConfig
+
+            self.env = env_fn(AllegroWarpConfig(**config))
+
         else:
             self.env = env_fn(**config)
 

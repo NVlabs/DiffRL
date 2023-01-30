@@ -10,11 +10,11 @@
 from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
 
 # from .cheetah import CheetahEnv
-from .dflex_env import DFlexEnv
+# from .dflex_env import DFlexEnv
 
 # from .hopper import HopperEnv
 # from .humanoid import HumanoidEnv
 # from .snu_humanoid import SNUHumanoidEnv
 
 # dmanip envs
-from dmanip.envs import WarpEnv, ClawWarpEnv
+from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv
