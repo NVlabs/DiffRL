@@ -30,6 +30,8 @@ from shac.utils.dataset import CriticDataset
 from shac.utils.time_report import TimeReport
 from shac.utils.average_meter import AverageMeter
 
+import torch.distributed as dist
+
 
 class SHAC:
     def __init__(self, cfg):
@@ -67,6 +69,21 @@ class SHAC:
         print("num_actions = ", self.env.num_actions)
         print("num_obs = ", self.env.num_obs)
 
+        self.multi_gpu = cfg["params"]["config"].get("multi_gpu", False)
+        self.rank = 0
+        self.rank_size = 1
+
+        if self.multi_gpu:
+            self.rank = int(os.getenv("LOCAL_RANK", "0"))
+            self.rank_size = int(os.getenv("WORLD_SIZE", "1"))
+            dist.init_process_group("nccl", rank=self.rank, world_size=self.rank_size)
+
+            self.device_name = "cuda:" + str(self.rank)
+            cfg["params"]["general"]["device"] = self.device_name
+            if self.rank != 0:
+                cfg["params"]["config"]["print_stats"] = False
+                cfg["params"]["config"]["lr_schedule"] = None
+
         self.num_envs = self.env.num_envs
         self.num_obs = self.env.num_obs
         self.num_actions = self.env.num_actions
@@ -95,10 +112,10 @@ class SHAC:
             self.scheduler = schedulers.AdaptiveScheduler(self.kl_threshold)
         elif self.is_linear_lr:
             self.scheduler = schedulers.LinearScheduler(
-                float(self.actor_lr),
+                start_lr=float(self.actor_lr),
+                min_lr=1e-5,
                 max_steps=self.max_epochs,
                 apply_to_entropy=False,
-                start_entropy_coef=0.0,
             )
 
         self.target_critic_alpha = cfg["params"]["config"].get(
@@ -131,19 +148,20 @@ class SHAC:
 
         if cfg["params"]["general"]["train"]:
             self.log_dir = cfg["params"]["general"]["logdir"]
-            os.makedirs(self.log_dir, exist_ok=True)
-            # save config
-            save_cfg = copy.deepcopy(cfg)
-            if "general" in save_cfg["params"]:
-                deleted_keys = []
-                for key in save_cfg["params"]["general"].keys():
-                    if key in save_cfg["params"]["config"]:
-                        deleted_keys.append(key)
-                for key in deleted_keys:
-                    del save_cfg["params"]["general"][key]
+            if not self.multi_gpu or self.rank == 0:
+                os.makedirs(self.log_dir, exist_ok=True)
+                # save config
+                save_cfg = copy.deepcopy(cfg)
+                if "general" in save_cfg["params"]:
+                    deleted_keys = []
+                    for key in save_cfg["params"]["general"].keys():
+                        if key in save_cfg["params"]["config"]:
+                            deleted_keys.append(key)
+                    for key in deleted_keys:
+                        del save_cfg["params"]["general"][key]
 
-            yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
-            self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
+                yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
+                self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
             # save interval
             self.save_interval = cfg["params"]["config"].get("save_interval", 500)
             # stochastic inference
@@ -185,6 +203,8 @@ class SHAC:
             betas=cfg["params"]["config"]["betas"],
             lr=self.critic_lr,
         )
+        self.mixed_precision = cfg["params"]["config"].get("mixed_precision", False)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
 
         # replay buffer
         self.obs_buf = torch.zeros(
@@ -570,6 +590,18 @@ class SHAC:
 
         # initializations
         self.initialize_env()
+        if self.multi_gpu:
+            torch.cuda.set_device(self.rank)
+            print("====================broadcasting parameters")
+            print("====actor parameters")
+            actor_params = [self.actor.state_dict()]
+            dist.broadcast_object_list(actor_params, 0)
+            self.actor.load_state_dict(actor_params[0])
+            print("====critic parameters")
+            critic_params = [self.critic.state_dict()]
+            dist.broadcast_object_list(critic_params, 0)
+            self.critic.load_state_dict(critic_params[0])
+
         self.episode_loss = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
@@ -582,23 +614,28 @@ class SHAC:
         )
 
         def actor_closure():
-            self.actor_optimizer.zero_grad()
+            self.actor_optimizer.zero_grad(set_to_none=True)
 
             self.time_report.start_timer("compute actor loss")
 
             self.time_report.start_timer("forward simulation")
             # checkpoint = self.env.get_checkpoint()
-            actor_loss = self.compute_actor_loss()
+            # TODO: use autoscaling for mixed precision
+
+            with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+                actor_loss = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
-            actor_loss.backward()
+            self.scaler.scale(actor_loss).backward()
             self.time_report.end_timer("backward simulation")
 
             with torch.no_grad():
+                self.scaler.unscale_(self.actor_optimizer)
                 self.grad_norm_before_clip = tu.grad_norm(self.actor.parameters())
-                if self.truncate_grad:
-                    clip_grad_norm_(self.actor.parameters(), self.grad_norm)
+                self.truncate_gradients_and_step(
+                    self.actor.parameters(), self.actor_optimizer, unscale=False
+                )
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
 
                 # sanity check
@@ -618,6 +655,7 @@ class SHAC:
 
             return actor_loss
 
+        actor_lr, critic_lr = self.actor_lr, self.critic_lr
         # main training process
         for epoch in range(self.max_epochs):
             self.curr_epoch += 1
@@ -625,23 +663,40 @@ class SHAC:
 
             # learning rate schedule
             if self.lr_schedule == "linear":
-                actor_lr = (1e-5 - self.actor_lr) * float(
-                    epoch / self.max_epochs
-                ) + self.actor_lr
+                # av_kls = torch_ext.mean_list(ep_kls)
+                # if self.multi_gpu:
+                #     dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
+                #     av_kls /= self.rank_size
+                if self.rank == 0:
+                    actor_lr, _ = self.scheduler.update(
+                        actor_lr, None, self.curr_epoch, None, None
+                    )
+                    critic_lr, _ = self.scheduler.update(
+                        critic_lr, None, self.curr_epoch, None, None
+                    )
+
+                if self.multi_gpu:
+                    lr_tensor = torch.tensor([actor_lr, critic_lr], device=self.device)
+                    dist.broadcast(lr_tensor, 0)
+                    actor_lr = lr_tensor[0].item()
+                    critic_lr = lr_tensor[1].item()
+
+                for param_group in self.critic_optimizer.param_groups:
+                    param_group["lr"] = critic_lr
+
                 for param_group in self.actor_optimizer.param_groups:
                     param_group["lr"] = actor_lr
                 lr = actor_lr
-                critic_lr = (1e-5 - self.critic_lr) * float(
-                    epoch / self.max_epochs
-                ) + self.critic_lr
-                for param_group in self.critic_optimizer.param_groups:
-                    param_group["lr"] = critic_lr
             else:
                 lr = self.actor_lr
 
             # train actor
             self.time_report.start_timer("actor training")
-            self.actor_optimizer.step(actor_closure).detach().item()
+            actor_loss = actor_closure()
+            # self.truncate_gradients_and_step(
+            #     self.actor.parameters(), self.actor_optimizer, unscale=False
+            # )
+            # self.actor_optimizer.step(actor_closure).detach().item()
             self.time_report.end_timer("actor training")
 
             # train critic
@@ -661,18 +716,18 @@ class SHAC:
                 batch_cnt = 0
                 for i in range(len(dataset)):
                     batch_sample = dataset[i]
-                    self.critic_optimizer.zero_grad()
-                    training_critic_loss = self.compute_critic_loss(batch_sample)
-                    training_critic_loss.backward()
+                    self.critic_optimizer.zero_grad(set_to_none=True)
+                    with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+                        training_critic_loss = self.compute_critic_loss(batch_sample)
+                    self.scaler.scale(training_critic_loss).backward()
 
                     # ugly fix for simulation nan problem
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    if self.truncate_grad:
-                        clip_grad_norm_(self.critic.parameters(), self.grad_norm)
-
-                    self.critic_optimizer.step()
+                    self.truncate_gradients_and_step(
+                        self.critic.parameters(), self.critic_optimizer
+                    )
 
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
@@ -691,7 +746,19 @@ class SHAC:
 
             time_end_epoch = time.time()
 
-            # logging
+            # update target critic
+            with torch.no_grad():
+                alpha = self.target_critic_alpha
+                for param, param_targ in zip(
+                    self.critic.parameters(), self.target_critic.parameters()
+                ):
+                    param_targ.data.mul_(alpha)
+                    param_targ.data.add_((1.0 - alpha) * param.data)
+
+            # skip logging if not the head node
+            if self.rank != 0 and self.multi_gpu:
+                continue
+
             time_elapse = time.time() - self.start_time
             self.writer.add_scalar("lr/iter", lr, self.iter_count)
             self.writer.add_scalar("actor_loss/step", self.actor_loss, self.step_count)
@@ -778,6 +845,8 @@ class SHAC:
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
 
+            self.writer.flush()
+
             print(
                 "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
@@ -793,8 +862,6 @@ class SHAC:
                 )
             )
 
-            self.writer.flush()
-
             if self.save_interval > 0 and (self.iter_count % self.save_interval == 0):
                 self.save(
                     self.name
@@ -803,42 +870,64 @@ class SHAC:
                     )
                 )
 
-            # update target critic
-            with torch.no_grad():
-                alpha = self.target_critic_alpha
-                for param, param_targ in zip(
-                    self.critic.parameters(), self.target_critic.parameters()
-                ):
-                    param_targ.data.mul_(alpha)
-                    param_targ.data.add_((1.0 - alpha) * param.data)
-
         self.time_report.end_timer("algorithm")
 
         self.time_report.report()
 
-        self.save("final_policy")
+        if self.rank == 0 or not self.multi_gpu:
+            self.save("final_policy")
+            # save reward/length history
+            self.episode_loss_his = np.array(self.episode_loss_his)
+            self.episode_discounted_loss_his = np.array(
+                self.episode_discounted_loss_his
+            )
+            self.episode_length_his = np.array(self.episode_length_his)
+            np.save(
+                open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
+                self.episode_loss_his,
+            )
+            np.save(
+                open(
+                    os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"
+                ),
+                self.episode_discounted_loss_his,
+            )
+            np.save(
+                open(os.path.join(self.log_dir, "episode_length_his.npy"), "wb"),
+                self.episode_length_his,
+            )
 
-        # save reward/length history
-        self.episode_loss_his = np.array(self.episode_loss_his)
-        self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
-        self.episode_length_his = np.array(self.episode_length_his)
-        np.save(
-            open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
-            self.episode_loss_his,
-        )
-        np.save(
-            open(os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"),
-            self.episode_discounted_loss_his,
-        )
-        np.save(
-            open(os.path.join(self.log_dir, "episode_length_his.npy"), "wb"),
-            self.episode_length_his,
-        )
+            # evaluate the final policy's performance
+            self.run(self.num_envs)
+            self.close()
 
-        # evaluate the final policy's performance
-        self.run(self.num_envs)
+    def truncate_gradients_and_step(self, parameters, optimizer, unscale=True):
+        if self.multi_gpu:
+            # batch allreduce ops: see https://github.com/entity-neural-network/incubator/pull/220
+            all_grads_list = []
+            for param in parameters:
+                if param.grad is not None:
+                    all_grads_list.append(param.grad.view(-1))
+            all_grads = torch.cat(all_grads_list)
+            dist.all_reduce(all_grads, op=dist.ReduceOp.SUM)
+            offset = 0
+            for param in parameters:
+                if param.grad is not None:
+                    param.grad.data.copy_(
+                        all_grads[offset : offset + param.numel()].view_as(
+                            param.grad.data
+                        )
+                        / self.rank_size
+                    )
+                    offset += param.numel()
 
-        self.close()
+        if self.truncate_grad:
+            if unscale:
+                self.scaler.unscale_(optimizer)
+            clip_grad_norm_(parameters, self.grad_norm)
+
+        self.scaler.step(optimizer)
+        self.scaler.update()
 
     def play(self, cfg):
         self.load(cfg["params"]["general"]["checkpoint"])
