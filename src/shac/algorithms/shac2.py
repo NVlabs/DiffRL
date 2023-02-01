@@ -39,20 +39,22 @@ class SHAC:
         env_fn = getattr(envs, env_name)
 
         seeding(cfg["params"]["general"]["seed"])
+        no_grad = cfg["params"]["general"]["play"]
+        render = cfg["params"]["general"]["render"]
         config = dict(
             num_envs=cfg["params"]["config"]["num_actors"],
             device=cfg["params"]["general"]["device"],
-            render=cfg["params"]["general"]["render"],
+            render=render,
             seed=cfg["params"]["general"]["seed"],
-            episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
+            episode_length=cfg["params"]["diff_env"].get("episode_length", 256),
             stochastic_init=cfg["params"]["diff_env"].get("stochastic_env", True),
-            no_grad=False,
+            no_grad=no_grad,
         )
         config.update(cfg["params"].get("diff_env", {}))
-        if env_name.lower().find("warp") < 0:
-            config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
-                "MM_caching_frequency", 1
-            )
+        # if env_name.lower().find("warp") < 0:
+        #     config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
+        #         "MM_caching_frequency", 1
+        #     )
         if env_name == "ClawWarpEnv":
             from dmanip.config import ClawWarpConfig
 
@@ -189,9 +191,6 @@ class SHAC:
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
-        if cfg["params"]["general"]["train"]:
-            self.save("init_policy")
-
         # initialize optimizer
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(),
@@ -203,6 +202,10 @@ class SHAC:
             betas=cfg["params"]["config"]["betas"],
             lr=self.critic_lr,
         )
+
+        if cfg["params"]["general"]["train"]:
+            self.save("init_policy")
+
         self.mixed_precision = cfg["params"]["config"].get("mixed_precision", False)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
 
@@ -647,8 +650,11 @@ class SHAC:
                         "shac training crashed due to unstable gradient, saving checkpoint"
                     )
                     # torch.save(checkpoint, os.path.join(self.log_dir, "bad_state.pt"))
-                    # self.save("crashed-training")
                     print("NaN gradient")
+                    if not self.multi_gpu or self.rank == 0:
+                        self.save("crashed")
+                    if self.multi_gpu:
+                        dist.destroy_process_group()
                     raise ValueError
 
             self.time_report.end_timer("compute actor loss")
@@ -656,8 +662,9 @@ class SHAC:
             return actor_loss
 
         actor_lr, critic_lr = self.actor_lr, self.critic_lr
+        start_epoch = self.curr_epoch
         # main training process
-        for epoch in range(self.max_epochs):
+        for epoch in range(start_epoch, self.max_epochs):
             self.curr_epoch += 1
             time_start_epoch = time.time()
 
@@ -930,28 +937,52 @@ class SHAC:
         self.scaler.update()
 
     def play(self, cfg):
-        self.load(cfg["params"]["general"]["checkpoint"])
+        self.load(cfg["params"]["general"]["checkpoint"], cfg)
         self.run(cfg["params"]["config"]["player"]["games_num"])
 
     def save(self, filename=None):
         if filename is None:
             filename = "best_policy"
         torch.save(
-            [self.actor, self.critic, self.target_critic, self._obs_rms, self.ret_rms],
+            [
+                self.actor,
+                self.critic,
+                self.target_critic,
+                self._obs_rms,
+                self.ret_rms,
+                self.actor_optimizer.state_dict(),
+                self.critic_optimizer.state_dict(),
+            ],
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
-    def load(self, path):
+    def load(self, path, cfg=None):
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
         self.target_critic = checkpoint[2].to(self.device)
-        self._obs_rms = checkpoint[3].to(self.device)
+        self._obs_rms = checkpoint[3]
+        if self._obs_rms is not None:
+            self._obs_rms = [x.to(self.device) for x in self._obs_rms]
         self.ret_rms = (
             checkpoint[4].to(self.device)
             if checkpoint[4] is not None
             else checkpoint[4]
         )
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(),
+            betas=cfg["params"]["config"]["betas"],
+            lr=self.actor_lr,
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(),
+            betas=cfg["params"]["config"]["betas"],
+            lr=self.critic_lr,
+        )
+
+        if len(checkpoint) == 7:  # backwards compatible with older checkpoints
+            self.actor_optimizer.load_state_dict(checkpoint[5])
+            self.critic_optimizer.load_state_dict(checkpoint[6])
 
     def close(self):
         self.writer.close()
