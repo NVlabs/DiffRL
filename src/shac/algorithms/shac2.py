@@ -84,7 +84,7 @@ class SHAC:
             cfg["params"]["general"]["device"] = self.device_name
             if self.rank != 0:
                 cfg["params"]["config"]["print_stats"] = False
-                cfg["params"]["config"]["lr_schedule"] = None
+                # cfg["params"]["config"]["lr_schedule"] = None
 
         self.num_envs = self.env.num_envs
         self.num_obs = self.env.num_obs
@@ -376,6 +376,8 @@ class SHAC:
                 next_values[i + 1] < -1e6
             ).sum() > 0:
                 print("next value error")
+                if self.multi_gpu:
+                    dist.destroy_process_group()
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
@@ -438,6 +440,8 @@ class SHAC:
                             or self.episode_loss[done_env_id] < -1e6
                         ):
                             print("ep loss error")
+                            if self.multi_gpu:
+                                dist.destroy_process_group()
                             raise ValueError
 
                         self.episode_loss_his.append(
@@ -595,15 +599,19 @@ class SHAC:
         self.initialize_env()
         if self.multi_gpu:
             torch.cuda.set_device(self.rank)
-            print("====================broadcasting parameters")
-            print("====actor parameters")
+            if self.rank == 0:
+                print("====================broadcasting parameters")
+                print("====actor parameters")
             actor_params = [self.actor.state_dict()]
             dist.broadcast_object_list(actor_params, 0)
             self.actor.load_state_dict(actor_params[0])
-            print("====critic parameters")
+            if self.rank == 0:
+                print("====critic parameters")
             critic_params = [self.critic.state_dict()]
             dist.broadcast_object_list(critic_params, 0)
             self.critic.load_state_dict(critic_params[0])
+            if self.rank == 0:
+                print("done broadcasting parameters====================")
 
         self.episode_loss = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
@@ -662,6 +670,7 @@ class SHAC:
             return actor_loss
 
         actor_lr, critic_lr = self.actor_lr, self.critic_lr
+        print("starting training: lr = {}, {}".format(actor_lr, critic_lr))
         start_epoch = self.curr_epoch
         # main training process
         for epoch in range(start_epoch, self.max_epochs):
@@ -862,6 +871,7 @@ class SHAC:
                     mean_episode_length,
                     self.steps_num
                     * self.num_envs
+                    * self.rank_size
                     / (time_end_epoch - time_start_epoch),
                     self.value_loss,
                     self.grad_norm_before_clip,
@@ -956,13 +966,13 @@ class SHAC:
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
-    def load(self, path, cfg=None):
+    def load(self, path, cfg):
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
         self.target_critic = checkpoint[2].to(self.device)
-        self._obs_rms = checkpoint[3]
-        if self._obs_rms is not None:
+        if checkpoint[3]:
+            self._obs_rms = checkpoint[3]
             self._obs_rms = [x.to(self.device) for x in self._obs_rms]
         self.ret_rms = (
             checkpoint[4].to(self.device)
