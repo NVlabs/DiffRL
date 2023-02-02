@@ -1,4 +1,4 @@
-# Copyright (c) 2022 NVIDIA CORPORATION.  All rights reserved.
+# Added option to resume training and loa Copyright (c) 2022 NVIDIA CORPORATION.  All rights reserved.
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
 # and any modifications thereto.  Any use, reproduction, disclosure or
@@ -955,9 +955,9 @@ class SHAC:
             filename = "best_policy"
         torch.save(
             [
-                self.actor,
-                self.critic,
-                self.target_critic,
+                self.actor.state_dict(),
+                self.critic.state_dict(),
+                self.target_critic.state_dict(),
                 self._obs_rms,
                 self.ret_rms,
                 self.actor_optimizer.state_dict(),
@@ -968,12 +968,24 @@ class SHAC:
 
     def load(self, path, cfg):
         checkpoint = torch.load(path)
-        self.actor = checkpoint[0].to(self.device)
-        self.critic = checkpoint[1].to(self.device)
-        self.target_critic = checkpoint[2].to(self.device)
+        if isinstance(checkpoint[0], dict):
+            self.actor.load_state_dict(checkpoint[0])
+        else:
+            self.actor = checkpoint[0].to(self.device)
+        if isinstance(checkpoint[1], dict):
+            self.critic.load_state_dict(checkpoint[1])
+        else:
+            self.critic = checkpoint[1].to(self.device)
+
+        if isinstance(checkpoint[2], dict):
+            self.target_critic.load_state_dict(checkpoint[2])
+        else:
+            self.target_critic = checkpoint[2].to(self.device)
+
         if checkpoint[3]:
             self._obs_rms = checkpoint[3]
             self._obs_rms = [x.to(self.device) for x in self._obs_rms]
+
         self.ret_rms = (
             checkpoint[4].to(self.device)
             if checkpoint[4] is not None
@@ -993,6 +1005,23 @@ class SHAC:
         if len(checkpoint) == 7:  # backwards compatible with older checkpoints
             self.actor_optimizer.load_state_dict(checkpoint[5])
             self.critic_optimizer.load_state_dict(checkpoint[6])
+
+    def resume_from(self, path, cfg, epoch, step_count=None, loss=None):
+        self.curr_epoch = epoch
+        if loss:
+            self.best_policy_loss = loss
+        if step_count:
+            self.step_count = step_count
+        if self.multi_gpu:
+            ep_tensor = torch.tensor(
+                [self.curr_epoch, self.step_count, self.best_policy_loss],
+                device=self.device,
+            )
+            dist.broadcast(ep_tensor, 0)
+            self.curr_epoch = int(ep_tensor[0].item())
+            self.step_count = int(ep_tensor[1].item())
+            self.best_policy_loss = ep_tensor[2].item()
+        self.load(path, cfg)
 
     def close(self):
         self.writer.close()
