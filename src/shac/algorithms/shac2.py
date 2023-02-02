@@ -630,7 +630,7 @@ class SHAC:
             self.time_report.start_timer("compute actor loss")
 
             self.time_report.start_timer("forward simulation")
-            # checkpoint = self.env.get_checkpoint()
+            env_state = self.env.get_checkpoint()
             # TODO: use autoscaling for mixed precision
 
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
@@ -657,7 +657,7 @@ class SHAC:
                     print(
                         "shac training crashed due to unstable gradient, saving checkpoint"
                     )
-                    # torch.save(checkpoint, os.path.join(self.log_dir, "bad_state.pt"))
+                    torch.save(env_state, os.path.join(self.log_dir, "bad_state.pt"))
                     print("NaN gradient")
                     if not self.multi_gpu or self.rank == 0:
                         self.save("crashed")
