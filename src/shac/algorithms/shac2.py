@@ -1018,9 +1018,10 @@ class SHAC:
                 device=self.device,
             )
             dist.broadcast(ep_tensor, 0)
-            self.curr_epoch = int(ep_tensor[0].item())
-            self.step_count = int(ep_tensor[1].item())
-            self.best_policy_loss = ep_tensor[2].item()
+            if self.rank != 0:
+                self.curr_epoch = int(ep_tensor[0].item())
+                self.step_count = int(ep_tensor[1].item())
+                self.best_policy_loss = ep_tensor[2].item()
         self.load(path, cfg)
 
     def close(self):
