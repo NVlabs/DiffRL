@@ -58,10 +58,12 @@ class SHAC:
         if env_name == "ClawWarpEnv":
             from dmanip.config import ClawWarpConfig
 
+            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
             self.env = env_fn(ClawWarpConfig(**config))
         elif env_name == "AllegroWarpEnv":
             from dmanip.config import AllegroWarpConfig
 
+            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
             self.env = env_fn(AllegroWarpConfig(**config))
 
         else:
@@ -370,7 +372,7 @@ class SHAC:
                         real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
                     else:
                         real_obs = extra_info["obs_before_reset"][id]
-                    next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
+                    next_values[i + 1, id] = self.critic(real_obs).squeeze(-1)
 
             if (next_values[i + 1] > 1e6).sum() > 0 or (
                 next_values[i + 1] < -1e6
