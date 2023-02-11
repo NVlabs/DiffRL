@@ -354,7 +354,7 @@ class SHAC:
 
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            next_values[i + 1] = self.target_critic(obs).squeeze(-1)
+            next_values[i + 1] = self.critic(obs).squeeze(-1)
 
             for id in done_env_ids:
                 if (
