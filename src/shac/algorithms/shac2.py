@@ -133,7 +133,7 @@ class SHAC:
             # generate obs_rms for each subtrajectory
             self._obs_rms = [
                 RunningMeanStd(shape=(self.num_obs), device=self.device)
-                for _ in range(self.sub_traj_per_epoch)
+                # for _ in range(self.sub_traj_per_epoch)
             ]
 
         self.ret_rms = None
@@ -292,7 +292,7 @@ class SHAC:
     def obs_rms(self):
         if self._obs_rms is None:
             return self._obs_rms
-        return self._obs_rms[self.curr_epoch % self.sub_traj_per_epoch]
+        return self._obs_rms[0] # self.curr_epoch % self.sub_traj_per_epoch]
 
     def compute_actor_loss(self, deterministic=False):
         rew_acc = torch.zeros(
@@ -354,7 +354,7 @@ class SHAC:
 
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            next_values[i + 1] = self.critic(obs).squeeze(-1)
+            next_values[i + 1] = self.target_critic(obs).squeeze(-1)
 
             for id in done_env_ids:
                 if (
@@ -372,7 +372,7 @@ class SHAC:
                         real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
                     else:
                         real_obs = extra_info["obs_before_reset"][id]
-                    next_values[i + 1, id] = self.critic(real_obs).squeeze(-1)
+                    next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
 
             if (next_values[i + 1] > 1e6).sum() > 0 or (
                 next_values[i + 1] < -1e6

@@ -34,7 +34,6 @@ class SHAC:
         env_name = cfg["params"]["diff_env"].pop("name")
         env_fn = getattr(envs, env_name)
 
-        seeding(cfg["params"]["general"]["seed"])
         if "stochastic_env" in cfg["params"]["diff_env"]:
             stochastic_init = cfg["params"]["diff_env"].pop("stochastic_env")
         else:
@@ -49,6 +48,7 @@ class SHAC:
             no_grad=False,
         )
         config.update(cfg["params"].get("diff_env", {}))
+        seeding(config["seed"])
         if env_name.lower().find("warp") < 0:
             config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
                 "MM_caching_frequency", 1
@@ -56,7 +56,14 @@ class SHAC:
         if env_name == "ClawWarpEnv":
             from dmanip.config import ClawWarpConfig
 
+            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
             self.env = env_fn(ClawWarpConfig(**config))
+        elif env_name == "AllegroWarpEnv":
+            from dmanip.config import AllegroWarpConfig
+
+            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
+            self.env = env_fn(AllegroWarpConfig(**config))
+
         else:
             self.env = env_fn(**config)
 
