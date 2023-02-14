@@ -14,7 +14,7 @@ sys.path.append(project_dir)
 import argparse
 
 from shac import envs
-from shac.algorithms.shac import SHAC
+from shac.algorithms.shac2 import SHAC
 import os
 import sys
 import yaml
