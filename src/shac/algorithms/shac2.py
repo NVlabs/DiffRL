@@ -129,6 +129,10 @@ class SHAC:
         self._obs_rms = None
         self.curr_epoch = 0
         self.sub_traj_per_epoch = math.ceil(self.max_episode_length / self.steps_num)
+        # number of episodes of no improvement for early stopping
+        self.early_stopping_patience = cfg["params"]["config"].get(
+            "early_stopping_patience", 10
+        )
         if cfg["params"]["config"].get("obs_rms", False):
             # generate obs_rms for each subtrajectory
             self._obs_rms = [
@@ -272,6 +276,7 @@ class SHAC:
         )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
+        self.best_policy_epoch = 0
         self.actor_loss = np.inf
         self.value_loss = np.inf
 
@@ -768,6 +773,7 @@ class SHAC:
             self.iter_count += 1
 
             time_end_epoch = time.time()
+            should_exit = False
 
             # update target critic
             with torch.no_grad():
@@ -801,6 +807,14 @@ class SHAC:
                     )
                     self.save()
                     self.best_policy_loss = mean_policy_loss
+                    self.best_policy_epoch = self.curr_epoch
+                # number of episodes with no improvement
+                else:
+                    last_improved_ep = (
+                        self.best_policy_epoch - self.curr_epoch
+                    ) / self.sub_traj_per_epoch
+                    if last_improved_ep > self.early_stopping_patience:
+                        should_exit = True
 
                 self.writer.add_scalar(
                     "policy_loss/step", mean_policy_loss, self.step_count
@@ -885,7 +899,6 @@ class SHAC:
                     self.grad_norm_after_clip,
                 )
             )
-
             if self.save_interval > 0 and (self.iter_count % self.save_interval == 0):
                 self.save(
                     self.name
@@ -893,6 +906,9 @@ class SHAC:
                         self.iter_count, -mean_policy_loss
                     )
                 )
+
+            if should_exit:
+                break
 
         self.time_report.end_timer("algorithm")
 
@@ -924,6 +940,9 @@ class SHAC:
             # evaluate the final policy's performance
             self.run(self.num_envs)
             self.close()
+
+        if self.multi_gpu and should_exit:
+            dist.destroy_process_group()
 
     def truncate_gradients_and_step(self, parameters, optimizer, unscale=True):
         if self.multi_gpu:
