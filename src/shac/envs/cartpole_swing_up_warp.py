@@ -74,6 +74,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
         self.cart_action_penalty = 0.0
 
+        # self.update_joints_graph = None
+
         # -----------------------
         # set up Usd renderer
         if self.visualize:
@@ -150,6 +152,8 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.model.joint_qd.requires_grad = self.requires_grad
         self.model.joint_act.requires_grad = self.requires_grad
 
+        self._joint_q = wp.zeros_like(self.model.joint_q)
+        self._joint_qd = wp.zeros_like(self.model.joint_qd)
         start_joint_q = wp.to_torch(self.model.joint_q).clone()
         start_joint_qd = wp.to_torch(self.model.joint_qd).clone()
         start_joint_act = wp.to_torch(self.model.joint_act).clone()
@@ -172,6 +176,25 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
             if self.num_frames == 40:
                 self.stage.save()
                 self.num_frames -= 40
+
+    def update_joints(self):
+        self._joint_q.zero_()
+        self._joint_qd.zero_()
+        if self._joint_q.grad is not None:
+            self._joint_q.grad.zero_()
+            self._joint_qd.grad.zero_()
+
+        # if self.update_joints_graph is None:
+        #     wp.capture_begin()
+        #     wp.sim.eval_ik(self.model, self.state_0, self._joint_q, self._joint_qd)
+        #     # self.compute_joint_q_qd()
+        #     self.update_joints_graph = wp.capture_end()
+
+        # wp.capture_launch(self.update_joints_graph)
+        wp.sim.eval_ik(self.model, self.state_0, self._joint_q, self._joint_qd)
+
+        self.joint_q = wp.to_torch(self._joint_q).clone()
+        self.joint_qd = wp.to_torch(self._joint_qd)
 
     def step(self, actions):
         with wp.ScopedTimer("simulate", active=False, detailed=False):

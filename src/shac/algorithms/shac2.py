@@ -41,13 +41,15 @@ class SHAC:
         seeding(cfg["params"]["general"]["seed"])
         no_grad = cfg["params"]["general"]["play"]
         render = cfg["params"]["general"]["render"]
+        stochastic_init = cfg["params"]["diff_env"].get("stochastic_env", True)
+        cfg["params"]["diff_env"].pop("stochastic_env")
         config = dict(
             num_envs=cfg["params"]["config"]["num_actors"],
             device=cfg["params"]["general"]["device"],
             render=render,
             seed=cfg["params"]["general"]["seed"],
             episode_length=cfg["params"]["diff_env"].get("episode_length", 256),
-            stochastic_init=cfg["params"]["diff_env"].get("stochastic_env", True),
+            stochastic_init=stochastic_init,
             no_grad=no_grad,
         )
         config.update(cfg["params"].get("diff_env", {}))
@@ -129,9 +131,9 @@ class SHAC:
         self._obs_rms = None
         self.curr_epoch = 0
         self.sub_traj_per_epoch = math.ceil(self.max_episode_length / self.steps_num)
-        # number of episodes of no improvement for early stopping
+        # number of epochs of no improvement for early stopping
         self.early_stopping_patience = cfg["params"]["config"].get(
-            "early_stopping_patience", 10
+            "early_stopping_patience", self.max_epochs
         )
         if cfg["params"]["config"].get("obs_rms", False):
             # generate obs_rms for each subtrajectory
@@ -810,9 +812,7 @@ class SHAC:
                     self.best_policy_epoch = self.curr_epoch
                 # number of episodes with no improvement
                 else:
-                    last_improved_ep = (
-                        self.best_policy_epoch - self.curr_epoch
-                    ) / self.sub_traj_per_epoch
+                    last_improved_ep = self.best_policy_epoch - self.curr_epoch
                     if last_improved_ep > self.early_stopping_patience:
                         should_exit = True
 
@@ -992,8 +992,8 @@ class SHAC:
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
-    def load(self, path, cfg):
-        checkpoint = torch.load(path)
+    def load(self, path, cfg, map_location=None):
+        checkpoint = torch.load(path, map_location=map_location)
         if isinstance(checkpoint[0], dict):
             self.actor.load_state_dict(checkpoint[0])
         else:
