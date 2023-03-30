@@ -1,0 +1,30 @@
+defaults:
+  - alg: shac_ant
+  - _self_
+
+hydra:
+  sweep:
+    dir: ${env:HOME}/checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
+
+exp_name: shac_benchmarks
+
+id: ${hydra.job.id}
+resume_model: null
+
+general:
+  play: False
+  logdir: "logs/tmp/shac/"
+  save_interval: False
+  no_time_stamp: False
+  render: False
+  device: "cuda:0"
+  run_wandb: False
+  seed: 0
+  train: True
+  checkpoint: ''
+
+wandb:
+  project: shac
+  group: ${exp_name}
+  sweep_name_prefix: run
