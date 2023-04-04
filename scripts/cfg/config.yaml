@@ -19,7 +19,7 @@ general:
   no_time_stamp: False
   render: False
   device: "cuda:0"
-  run_wandb: False
+  run_wandb: True
   seed: 0
   train: True
   checkpoint: ''
@@ -27,4 +27,4 @@ general:
 wandb:
   project: shac
   group: ${exp_name}
-  sweep_name_prefix: run
+  sweep_name_prefix: ${alg.diff_env.name}_${alg.name}-run

@@ -8,7 +8,6 @@
 import math
 import os
 import sys
-
 import torch
 
 from dmanip.envs import WarpEnv
@@ -42,7 +41,6 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         stochastic_init=False,
         early_termination=False,
     ):
-
         num_obs = 5
         num_act = 1
 
@@ -123,7 +121,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.builder = wp.sim.ModelBuilder()
 
         for i in range(self.num_envs):
-            self.builder.add_rigid_articulation(
+            self.builder.add_builder(
                 self.articulation_builder,
                 xform=wp.transform(
                     np.array((0.0, 2.5, self.env_dist * i)),
