@@ -7,8 +7,9 @@
 
 from .ant import AntEnv
 from .cartpole_swing_up import CartPoleSwingUpEnv
-from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
-# from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
+
+# from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
+from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
 
 from .cheetah import CheetahEnv
 from .dflex_env import DFlexEnv

@@ -40,6 +40,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         no_grad=True,
         stochastic_init=False,
         early_termination=False,
+        inverted_pendulum=True,
     ):
         num_obs = 5
         num_act = 1
@@ -57,7 +58,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         )
 
         self.early_termination = early_termination
-
+        self.inverted_pendulum = inverted_pendulum
         self.init_sim()
 
         # action parameters
@@ -93,13 +94,16 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
 
         self.env_dist = 1.0
 
-        self.num_joint_q = 2
-        self.num_joint_qd = 2
+        self.num_joint_q = 2 + int(self.inverted_pendulum)
+        self.num_joint_qd = 2 + int(self.inverted_pendulum)
 
         asset_folder = os.path.join(os.path.dirname(__file__), "assets")
+        cartpole_filename = (
+            "invertedcartpole.urdf" if self.inverted_pendulum else "cartpole.urdf"
+        )
         self.articulation_builder = wp.sim.ModelBuilder()
         wp.sim.parse_urdf(
-            os.path.join(asset_folder, "cartpole.urdf"),
+            os.path.join(asset_folder, cartpole_filename),
             self.articulation_builder,
             xform=wp.transform(
                 np.array((0.0, 0.0, 0.0)),

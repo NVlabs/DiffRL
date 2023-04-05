@@ -1,6 +1,5 @@
 import traceback
 import hydra, os, wandb, yaml
-from tcdm.rl import trainers
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
 from shac.algorithms.shac import SHAC
