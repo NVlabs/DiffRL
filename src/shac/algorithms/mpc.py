@@ -14,7 +14,7 @@ class Policy:
         dt: float = 1.0 / 60.0,
         max_steps: int = 512,
         params: Optional[np.ndarray] = None,
-        policy_type: str = "linear",
+        policy_type: str = "zero",
         step: float = 0.0,
     ):
         self.num_actions = num_actions
@@ -74,9 +74,7 @@ class Planner:
             + self.noise * np.random.randn(*self.policy.params.shape)
             for _ in range(self.num_trajectories - 1)
         ]
-        policies = [
-            self.policy.get_policy(params[i]) for i in range(self.num_trajectories - 1)
-        ]
+        policies = [self.policy.get_policy(p) for p in params]
 
         rewards = self.rollout(policies)
         best_traj = torch.argmax(rewards).item()
@@ -101,19 +99,22 @@ class Planner:
                 ckpt[k] = ckpt_v.repeat(self.num_trajectories, 1)
             self.env.load_checkpoint(ckpt)
 
-    def rollout(self, policies):
+    def rollout(self, policies=None, render=False):
         """Rollout the policy"""
-        done = False
         acc_rew = 0.0
-        obs = self.env.reset()
+        self.env.reset()
         self.policy.step = 0
+        if policies is None:
+            policies = [self.policy.get_policy()] * self.num_trajectories
         for t in range(self.policy.max_steps):
             action = torch.tensor(
                 [policy(t) for policy in policies],
                 device=self.env.device,
                 dtype=torch.float32,
             )
-            obs, reward, done, info = self.env.step(action)
+            obs, reward, _, _ = self.env.step(action)
+            if render:
+                self.env.render()
             acc_rew += reward
             self.policy.step += 1
 
