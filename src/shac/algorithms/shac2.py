@@ -397,15 +397,12 @@ class SHAC:
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
             if i < self.steps_num - 1:
-                actor_loss = (
-                    actor_loss
-                    + (
-                        -rew_acc[i + 1, done_env_ids]
-                        - self.gamma
-                        * gamma[done_env_ids]
-                        * next_values[i + 1, done_env_ids]
-                    ).sum()
-                )
+                actor_loss += (
+                    -rew_acc[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values[i + 1, done_env_ids]
+                ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
                 actor_loss = (
