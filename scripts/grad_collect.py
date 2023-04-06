@@ -1,4 +1,5 @@
 import hydra
+from hydra.utils import instantiate
 from omegaconf import OmegaConf, DictConfig
 from shac import envs
 import numpy as np
@@ -6,35 +7,21 @@ import torch
 
 
 @hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(cfg: DictConfig):
-    seed = 0
-    ep_len = 200
-    num_envs = 1024
-    device = "cuda:0"
+def main(config: DictConfig):
+    device = torch.device(config.general.device)
+    torch.random.manual_seed(config.general.seed)
 
-    torch.random(seed)
-
-    env = envs.CartPoleSwingUpEnv(
-        render=False,
-        device=device,
-        num_envs=num_envs,
-        seed=0,
-        episode_length=ep_len,
-        no_grad=False,
-        stochastic_init=False,
-        MM_caching_frequency=4,
-        early_termination=False,
-        inverted_pendulum=True,
-    )
+    # create environment
+    env = instantiate(config.env)
 
     # create a random set of actions
     std = 0.5
-    w = torch.normal(0.0, std, (num_envs, env.num_acts)).to(device)
+    w = torch.normal(0.0, std, (config.env.num_envs, env.num_acts)).to(device)
     w[0] = w[0].zero_()
     fobgs = []
     zobgs = []
 
-    for h in range(1, ep_len):
+    for h in range(1, config.env.episode_length):
         print("h={:}".format(h))
         env.clear_grad()
         env.reset()
@@ -42,7 +29,7 @@ def main(cfg: DictConfig):
         ww = w.clone()
         ww.requires_grad_(True)
 
-        loss = torch.zeros(num_envs).to(device)
+        loss = torch.zeros(config.env.num_envs).to(device)
 
         # apply first noisy action
         obs, rew, done, info = env.step(ww)
@@ -62,7 +49,7 @@ def main(cfg: DictConfig):
         zobgs.append(zobg.detach().cpu().numpy())
 
     np.savez(
-        "{:}_grads_{:}".format(env.__class__.__name__, ep_len),
+        "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length),
         zobgs=np.array(zobgs),
         fobgs=np.array(fobgs),
     )

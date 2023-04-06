@@ -7,17 +7,24 @@
 
 from .ant import AntEnv
 from .cartpole_swing_up import CartPoleSwingUpEnv
-
-from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
-
-# from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
-
+from .double_pendulum import DoublePendulumEnv
 from .cheetah import CheetahEnv
 from .dflex_env import DFlexEnv
-
 from .hopper import HopperEnv
 from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
-# dmanip envs
-from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv
+try:
+    from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
+except:
+    print("WARN: Couldn't import warp. Is it installed?")
+
+try:
+    from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
+except:
+    print("WARN: Couldn't import CartPoleSwingUpWarpEnv. Is warp it installed?")
+
+try:
+    from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv
+except:
+    print("WARN: Couldn't import dmanip envs. Is it installed?")

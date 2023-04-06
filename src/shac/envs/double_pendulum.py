@@ -30,7 +30,7 @@ from utils import load_utils as lu
 from utils import torch_utils as tu
 
 
-class CartPoleSwingUpEnv(DFlexEnv):
+class DoublePendulumEnv(DFlexEnv):
     def __init__(
         self,
         render=False,
@@ -43,10 +43,10 @@ class CartPoleSwingUpEnv(DFlexEnv):
         MM_caching_frequency=1,
         early_termination=False,
     ):
-        num_obs = 5
+        num_obs = 5 + 3
         num_act = 1
 
-        super(CartPoleSwingUpEnv, self).__init__(
+        super(DoublePendulumEnv, self).__init__(
             num_envs,
             num_obs,
             num_act,
@@ -99,15 +99,15 @@ class CartPoleSwingUpEnv(DFlexEnv):
         else:
             self.env_dist = 0.0
 
-        self.num_joint_q = 2
-        self.num_joint_qd = 2
+        self.num_joint_q = 3
+        self.num_joint_qd = 3
 
         asset_folder = os.path.join(os.path.dirname(__file__), "assets")
-        cartpole_filename = "cartpole.urdf"
+        filename = "invertedcartpole.urdf"
         for i in range(self.num_environments):
             lu.urdf_load(
                 self.builder,
-                os.path.join(asset_folder, cartpole_filename),
+                os.path.join(asset_folder, filename),
                 df.transform(
                     (0.0, 2.5, 0.0 + self.env_dist * i),
                     df.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
@@ -116,6 +116,8 @@ class CartPoleSwingUpEnv(DFlexEnv):
                 shape_kd=1e4,
                 limit_kd=1.0,
             )
+
+            # set starting state
             self.builder.joint_q[i * self.num_joint_q] = math.pi
             self.builder.joint_q[i * self.num_joint_q + 1] = 0.0
             self.builder.joint_qd[i * self.num_joint_q] = 5.0
@@ -277,7 +279,8 @@ class CartPoleSwingUpEnv(DFlexEnv):
         theta = tu.normalize_angle(self.state.joint_q.view(self.num_envs, -1)[:, 1])
         xdot = self.state.joint_qd.view(self.num_envs, -1)[:, 0]
         theta_dot = self.state.joint_qd.view(self.num_envs, -1)[:, 1]
-        pole_angle_penalty = -torch.pow(theta, 2.0) * self.pole_angle_penalty
+        tip_pos = self.state.body_X_sc.view(self.num_envs, -1, 7)[:, 3, 1]
+        pole_angle_penalty = (-torch.pow(tip_pos - 2.5, 2.0) * self.pole_angle_penalty)
 
         self.rew_buf = (
             pole_angle_penalty

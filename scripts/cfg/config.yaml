@@ -1,6 +1,7 @@
 defaults:
-  - alg: shac_ant
   - _self_
+  - alg: shac_ant
+  - env: cartpole
 
 hydra:
   sweep:
@@ -14,15 +15,15 @@ resume_model: null
 
 general:
   play: False
-  logdir: "logs/tmp/shac/"
+  logdir: logs/tmp/shac/
   save_interval: False
   no_time_stamp: False
   render: False
-  device: "cuda:0"
+  device: cuda:0
   run_wandb: True
   seed: 0
   train: True
-  checkpoint: ''
+  checkpoint:
 
 wandb:
   project: shac
