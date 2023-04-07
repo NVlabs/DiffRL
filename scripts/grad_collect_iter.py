@@ -11,9 +11,9 @@ from torchviz import make_dot
 @hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
 def main(config: DictConfig):
     device = torch.device(config.general.device)
+
     torch.random.manual_seed(config.general.seed)
 
-    # create environment
     env = instantiate(config.env)
 
     # create a random set of actions
@@ -23,29 +23,28 @@ def main(config: DictConfig):
     fobgs = []
     zobgs = []
 
-    for h in tqdm(range(1, config.env.episode_length)):
-        env.clear_grad()
-        env.reset()
+    h = 200
+    env.clear_grad()
+    env.reset()
 
-        ww = w.clone()
-        ww.requires_grad_(True)
-        loss = torch.zeros(config.env.num_envs).to(device)
+    ww = w.clone()
+    ww.requires_grad_(True)
+    loss = torch.zeros(config.env.num_envs).to(device)
 
-        # apply first noisy action
-        obs, rew, done, info = env.step(ww)
+    # apply first noisy action
+    obs, rew, done, info = env.step(ww)
+    loss += rew
+    loss.sum().backward(retain_graph=True)
+
+    # let episode play out
+    for t in tqdm(range(1, h)):
+        obs, rew, done, info = env.step(torch.zeros_like(ww))
         loss += rew
-
-        # let episode play out
-        for t in range(1, h):
-            obs, rew, done, info = env.step(torch.zeros_like(ww))
-            loss += rew
-            # NOTE: commented out code below is for the debugging of more efficient grad computation
-            # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("correct_graph")
-            loss.sum().backward()
-            print(ww.grad)
-            exit(1)
-
-        loss.sum().backward()
+        ww.grad.zero_()  # do to make gradients correct
+        # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("bad_graph")
+        loss.sum().backward(retain_graph=True)
+        print(ww.grad)
+        exit(1)
 
         fobgs.append(ww.grad.cpu().numpy())
 
@@ -54,7 +53,7 @@ def main(config: DictConfig):
         zobgs.append(zobg.detach().cpu().numpy())
 
     np.savez(
-        "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length),
+        "{:}_grads2_{:}".format(env.__class__.__name__, h),
         zobgs=np.array(zobgs),
         fobgs=np.array(fobgs),
     )

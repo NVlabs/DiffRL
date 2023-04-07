@@ -5,7 +5,7 @@ import seaborn as sns
 
 sns.set()
 
-filename = "HopperEnv_grads_100.npz"
+filename = "CartPoleSwingUpEnv_grads_200.npz"
 
 data = np.load(filename)
 fobgs = data["fobgs"].squeeze()
@@ -41,6 +41,6 @@ ax2.set_xlabel("H")
 ax2.set_title("Gradient variance")
 plt.tight_layout()
 
-filename = filename.split(".")[0]
+filename = filename.split(".")[0] + ".pdf"
 print("Saving to {:}".format(filename))
-plt.savefig(filename + ".pdf")
+plt.savefig(filename)
