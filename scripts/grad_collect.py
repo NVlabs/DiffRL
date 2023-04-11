@@ -18,10 +18,14 @@ def main(config: DictConfig):
 
     # create a random set of actions
     std = 0.5
+    n = env.num_obs
+    m = env.num_acts
     w = torch.normal(0.0, std, (config.env.num_envs, env.num_acts)).to(device)
     w[0] = w[0].zero_()
     fobgs = []
     zobgs = []
+    losses = []
+    baseline = []
 
     for h in tqdm(range(1, config.env.episode_length)):
         env.clear_grad()
@@ -41,11 +45,13 @@ def main(config: DictConfig):
             loss += rew
             # NOTE: commented out code below is for the debugging of more efficient grad computation
             # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("correct_graph")
-            loss.sum().backward()
-            print(ww.grad)
-            exit(1)
+            # loss.sum().backward()
+            # print(ww.grad)
+            # exit(1)
 
         loss.sum().backward()
+        losses.append(loss.detach().cpu().numpy())
+        baseline.append(loss[0].detach().cpu().numpy())
 
         fobgs.append(ww.grad.cpu().numpy())
 
@@ -53,10 +59,17 @@ def main(config: DictConfig):
         zobg = 1 / std**2 * (loss.unsqueeze(1) - loss[0]) * ww
         zobgs.append(zobg.detach().cpu().numpy())
 
+    filename = "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length)
+    print("Saving to", filename)
     np.savez(
-        "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length),
-        zobgs=np.array(zobgs),
-        fobgs=np.array(fobgs),
+        filename,
+        zobgs=zobgs,
+        fobgs=fobgs,
+        losses=losses,
+        baseline=baseline,
+        std=std,
+        n=n,
+        m=m,
     )
 
 
