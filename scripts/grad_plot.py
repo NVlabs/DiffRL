@@ -2,10 +2,20 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from numpy.linalg import norm
 
 sns.set()
 
-filename = "CartPoleSwingUpEnv_grads_200.npz"
+
+def norm_variance(arr: np.ndarray):
+    assert len(arr.shape) == 3, arr.shape
+    return np.mean(
+        norm(arr - np.mean(arr, axis=1, keepdims=True), ord=2, axis=-1) ** 2,
+        axis=1,
+    )
+
+
+filename = "outputs/grads/HopperEnv_grads_124.npz"
 print("Loading", filename)
 
 data = np.load(filename)
@@ -14,7 +24,6 @@ zobgs = data["zobgs"]
 loss = data["losses"]
 baseline = data["baseline"]
 zobgs = np.nan_to_num(zobgs)
-zobgs_analytical = data["zobgs_analytical"] if "zobgs_analytical" in data else None
 zobgs_no_grad = data["zobgs_no_grad"] if "zobgs_no_grad" in data else None
 if zobgs_no_grad is not None:
     print("Found no grad!")
@@ -27,24 +36,20 @@ m = data["m"]
 std = data["std"]
 print(f"Loaded grads with H={H}, N={N} n={n} m={m} std={std}")
 
-columns = ["H", "loss", "zobgs", "fobgs", "zobgs_no_grad"]
+grad_names = []
+for j in range(m):
+    grad_names.extend([f"zobgs_{j}", f"fobgs_{j}", f"zobgs_no_grad_{j}"])
+columns = ["H", "loss"] + grad_names
 df = pd.DataFrame(columns=columns)
 
-# TODO parametarize
-th_idx = 0
-print("Plotting for gradients with index", th_idx)
-# TODO I think this is actully wrong. Should handle this as vectors not scalars
-zobgs = zobgs[:, :, th_idx]
-fobgs = fobgs[:, :, th_idx]
-if zobgs_no_grad is not None:
-    zobgs_no_grad = zobgs_no_grad[:, :, th_idx]
-
 for i in range(H):
-    d = {"H": i + 1, "loss": loss[i], "zobgs": zobgs[i], "fobgs": fobgs[i]}
-    if zobgs_no_grad is not None:
-        d.update({"zobgs_no_grad": zobgs_no_grad[i]})
+    d = {"H": i + 1, "loss": loss[i]}
+    for j in range(m):
+        d.update({f"zobgs_{j}": zobgs[i, :, j], f"fobgs_{j}": fobgs[i, :, j]})
+        if zobgs_no_grad is not None:
+            d.update({f"zobgs_no_grad_{j}": zobgs_no_grad[i, :, j]})
     df = pd.concat((df, pd.DataFrame(d)))
-df = df.explode(["loss", "zobgs", "fobgs", "zobgs_no_grad"])
+df = df.explode(["loss"] + grad_names)
 df = df.reset_index()
 
 print("Plotting")
@@ -53,8 +58,10 @@ f.suptitle(filename.replace(".npz", ""))
 
 # 1. Plot bias
 hh = np.arange(H) + 1
-bias_l2 = ((zobgs.mean(axis=1) - fobgs.mean(axis=1)) ** 2) ** 0.5
-bias_l1 = np.abs(zobgs.mean(axis=1) - fobgs.mean(axis=1))
+diff = zobgs.mean(axis=1) - fobgs.mean(axis=1)
+print("diff shape", diff.shape)
+bias_l2 = norm(diff, ord=2, axis=-1)
+bias_l1 = norm(diff, ord=1, axis=-1)
 ax[0, 0].plot(hh, bias_l2, label="L2 Bias")
 ax[0, 0].plot(hh, bias_l1, label="L1 Bias")
 ax[0, 0].set_title("FoBG bias wrt ZoBG")
@@ -62,41 +69,31 @@ ax[0, 0].legend()
 ax[0, 0].set_xlabel("H")
 
 # 2. Plot gradient estiamtes
-sns.lineplot(df, x="H", y="zobgs", ax=ax[1, 0], errorbar="sd", label="ZoBGs")
-sns.lineplot(df, x="H", y="fobgs", ax=ax[1, 0], errorbar="sd", label="FoBGs")
-if zobgs_no_grad is not None:
+for j in range(m):
     sns.lineplot(
-        df,
-        x="H",
-        y="zobgs_no_grad",
-        ax=ax[1, 0],
-        errorbar="sd",
-        label="ZoBGs no grad",
+        df, x="H", y=f"zobgs_{j}", ax=ax[1, 0], errorbar="sd", label=f"ZoBGs {j}"
     )
-if zobgs_analytical is not None:
     sns.lineplot(
-        df,
-        x="H",
-        y="zobgs_analytical",
-        ax=ax[1, 0],
-        errorbar="sd",
-        label="ZoBGs analytical",
+        df, x="H", y=f"fobgs_{j}", ax=ax[1, 0], errorbar="sd", label=f"FoBGs {j}"
     )
+    if zobgs_no_grad is not None:
+        sns.lineplot(
+            df,
+            x="H",
+            y=f"zobgs_no_grad_{j}",
+            ax=ax[1, 0],
+            errorbar="sd",
+            label=f"True ZoBGs {j}",
+        )
 ax[1, 0].set_title("Gradient estimate wrt action")
 ax[1, 0].set_ylabel(None)
 ax[1, 0].legend()
 
 # 3. Plot variance
-var = np.var(zobgs, axis=1)
-ax[0, 1].plot(hh, var, label="ZoBGs")
-var = np.var(fobgs, axis=1)
-ax[0, 1].plot(hh, var, label="FoBGs")
+ax[0, 1].plot(hh, norm_variance(zobgs), label="ZoBGs")
+ax[0, 1].plot(hh, norm_variance(fobgs), label="FoBGs")
 if zobgs_no_grad is not None:
-    var = np.var(zobgs_no_grad, axis=1)
-    ax[0, 1].plot(hh, var, label="True ZoBGs")
-if zobgs_analytical is not None:
-    var = np.var(zobgs_analytical, axis=1)
-    ax[0, 1].plot(hh, var, label="Analytical ZoBGs")
+    ax[0, 1].plot(hh, norm_variance(zobgs_no_grad), label="True ZoBGs")
 ax[0, 1].plot(hh, hh**3 * m / (N * std**2), label="Lemma 3.10")
 ax[0, 1].set_yscale("log")
 ax[0, 1].set_xlabel("H")

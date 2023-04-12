@@ -60,6 +60,7 @@ def main(config: DictConfig):
         zobgs.append(zobg.detach().cpu().numpy())
 
     filename = "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length)
+    filename = f"outputs/grads/{filename}"
     if hasattr(env, "start_state"):
         filename += "_" + str(env.start_state)
     print("Saving to", filename)
