@@ -36,11 +36,11 @@ params:
     betas: 
       - 0.7
       - 0.95 # adam
-    max_epochs: 500
+    max_epochs: 200
     steps_num: 32
     grad_norm: 1.0
     truncate_grads: True
-    num_actors: 1024
+    num_actors: 64
     save_interval: 100
 
     player:
