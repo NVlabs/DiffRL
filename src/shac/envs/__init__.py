@@ -14,15 +14,6 @@ from .hopper import HopperEnv
 from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
-try:
-    from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
-except:
-    print("WARN: Couldn't import warp. Is it installed?")
-
-try:
-    from .cartpole_swing_up_warp import CartPoleSwingUpWarpEnv
-except:
-    print("WARN: Couldn't import CartPoleSwingUpWarpEnv. Is warp it installed?")
 
 try:
     from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv

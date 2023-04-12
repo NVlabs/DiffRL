@@ -31,6 +31,14 @@ from utils import torch_utils as tu
 
 
 class CartPoleSwingUpEnv(DFlexEnv):
+    """ "
+    The real state of the system is [x, x_dot, theta, theta_dot]
+        where x is position on slide and theta is angle of the pendulum.
+        theta=0 is pendulum pointing upwards
+    The observations are [x, x_dot, sin(theta), cos(theta), theta_dot]
+    The actions are [x_ddot]
+    """
+
     def __init__(
         self,
         render=False,
@@ -42,6 +50,7 @@ class CartPoleSwingUpEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=1,
         early_termination=False,
+        start_state=[0.0, 0.0, 0.0, 0.0],
     ):
         num_obs = 5
         num_act = 1
@@ -57,6 +66,9 @@ class CartPoleSwingUpEnv(DFlexEnv):
             render,
             device,
         )
+
+        self.start_state = np.array(start_state)
+        assert self.start_state.shape[0] == 4, self.start_state
 
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
@@ -116,10 +128,10 @@ class CartPoleSwingUpEnv(DFlexEnv):
                 shape_kd=1e4,
                 limit_kd=1.0,
             )
-            self.builder.joint_q[i * self.num_joint_q] = math.pi
-            self.builder.joint_q[i * self.num_joint_q + 1] = 0.0
-            self.builder.joint_qd[i * self.num_joint_q] = 5.0
-            self.builder.joint_qd[i * self.num_joint_q + 1] = -5.0
+            self.builder.joint_q[i * self.num_joint_q] = self.start_state[0]
+            self.builder.joint_q[i * self.num_joint_q + 1] = self.start_state[1]
+            self.builder.joint_qd[i * self.num_joint_q] = self.start_state[2]
+            self.builder.joint_qd[i * self.num_joint_q + 1] = self.start_state[3]
 
         self.model = self.builder.finalize(self.device)
         self.model.ground = False
