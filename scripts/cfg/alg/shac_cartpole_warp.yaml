@@ -8,12 +8,16 @@ params:
   network:
     actor: ActorStochasticMLP #ActorDeterministicMLP
     actor_mlp:
-      units: [64, 64]
+      units: 
+        - 64
+        - 64
       activation: elu
 
     critic: CriticMLP
     critic_mlp:
-      units: [64, 64]
+      units:
+        - 64
+        - 64
       activation: elu
 
   config:
@@ -29,8 +33,10 @@ params:
     lambda: 0.95
     num_batch: 4
     gamma: 0.99
-    betas: [0.7, 0.95] # adam
-    max_epochs: 500
+    betas: 
+      - 0.7
+      - 0.95 # adam
+    max_epochs: 200
     steps_num: 32
     grad_norm: 1.0
     truncate_grads: True

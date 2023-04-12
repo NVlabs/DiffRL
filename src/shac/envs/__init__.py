@@ -7,7 +7,6 @@
 
 from .ant import AntEnv
 from .cartpole_swing_up import CartPoleSwingUpEnv
-from .double_pendulum import DoublePendulumEnv
 from .cheetah import CheetahEnv
 from .dflex_env import DFlexEnv
 from .hopper import HopperEnv
@@ -15,7 +14,9 @@ from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
 
+# dmanip envs
 try:
     from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv
-except:
-    print("WARN: Couldn't import dmanip envs. Is it installed?")
+except ImportError:
+    print("dmanip not found, skipping dmanip envs")
+    pass

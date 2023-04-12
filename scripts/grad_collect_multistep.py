@@ -1,3 +1,4 @@
+from typing import Union
 import hydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf, DictConfig
@@ -6,11 +7,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torchviz import make_dot
-from shac.envs import DFlexEnv
-from shac.algorithms.shac import SHAC
-
-# from torch.nn.utils import param
-from torch.nn.utils import parameters_to_vector
+from shac.envs import DFlexEnv, WarpEnv
 
 
 @hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
@@ -19,7 +16,7 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env: DFlexEnv = instantiate(config.env)
+    env: Union[DFlexEnv, WarpEnv] = instantiate(config.env.config)
 
     n = env.num_obs
     m = env.num_acts

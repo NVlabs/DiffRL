@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - alg: shac_ant
+  - alg: shac
   - env: cartpole
 
 hydra:

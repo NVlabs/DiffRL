@@ -5,71 +5,35 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from multiprocessing.sharedctypes import Value
-import sys, os
-
+import copy
 import math
+from hydra.utils import instantiate
+import os
+import sys
+import time
+
+import yaml
+
+from rl_games.common import schedulers
+from rl_games.algos_torch import torch_ext
+from shac.utils.average_meter import AverageMeter
+from shac.utils.common import *
+from shac.utils.dataset import CriticDataset
+from shac.utils.running_mean_std import RunningMeanStd
+from shac.utils.time_report import TimeReport
+import shac.utils.torch_utils as tu
+from tensorboardX import SummaryWriter
+import torch.distributed as dist
 from torch.nn.utils.clip_grad import clip_grad_norm_
 
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
 
-import time
-import copy
-from tensorboardX import SummaryWriter
-import yaml
-
-from shac import envs
-from rl_games.common import schedulers
-import shac.models.actor as actor_models
-import shac.models.critic as critic_models
-from shac.utils.common import *
-import shac.utils.torch_utils as tu
-from shac.utils.running_mean_std import RunningMeanStd
-from shac.utils.dataset import CriticDataset
-from shac.utils.time_report import TimeReport
-from shac.utils.average_meter import AverageMeter
-
-import torch.distributed as dist
-
 
 class SHAC:
-    def __init__(self, cfg):
-        env_name = cfg["params"]["diff_env"].pop("name")
-        env_fn = getattr(envs, env_name)
-
+    def __init__(self, cfg: dict):
         seeding(cfg["params"]["general"]["seed"])
-        no_grad = cfg["params"]["general"]["play"]
-        render = cfg["params"]["general"]["render"]
-        stochastic_init = cfg["params"]["diff_env"].get("stochastic_env", True)
-        cfg["params"]["diff_env"].pop("stochastic_env")
-        config = dict(
-            num_envs=cfg["params"]["config"]["num_actors"],
-            device=cfg["params"]["general"]["device"],
-            render=render,
-            seed=cfg["params"]["general"]["seed"],
-            episode_length=cfg["params"]["diff_env"].get("episode_length", 256),
-            stochastic_init=stochastic_init,
-            no_grad=no_grad,
-        )
-        config.update(cfg["params"].get("diff_env", {}))
-        # if env_name.lower().find("warp") < 0:
-        #     config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
-        #         "MM_caching_frequency", 1
-        #     )
-        if env_name == "ClawWarpEnv":
-            from dmanip.config import ClawWarpConfig
-
-            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
-            self.env = env_fn(ClawWarpConfig(**config))
-        elif env_name == "AllegroWarpEnv":
-            from dmanip.config import AllegroWarpConfig
-
-            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
-            self.env = env_fn(AllegroWarpConfig(**config))
-
-        else:
-            self.env = env_fn(**config)
+        self.env = instantiate(cfg.env.config)
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
@@ -114,15 +78,11 @@ class SHAC:
         self.is_linear_lr = self.lr_schedule == "linear"
 
         if self.is_adaptive_lr:
-            self.kl_threshold = 0.008  # TODO: add to config
-            self.scheduler = schedulers.AdaptiveScheduler(self.kl_threshold)
+            self.scheduler = instantiate(cfg["params"]["default_adaptive_scheduler"])
         elif self.is_linear_lr:
-            self.scheduler = schedulers.LinearScheduler(
-                start_lr=float(self.actor_lr),
-                min_lr=1e-5,
-                max_steps=self.max_epochs,
-                apply_to_entropy=False,
-            )
+            self.scheduler = instantiate(cfg["params"]["default_linear_scheduler"])
+        else:
+            self.scheduler = schedulers.IdentityScheduler()
 
         self.target_critic_alpha = cfg["params"]["config"].get(
             "target_critic_alpha", 0.4
@@ -151,7 +111,7 @@ class SHAC:
         self.critic_iterations = cfg["params"]["config"].get("critic_iterations", 16)
         self.num_batch = cfg["params"]["config"].get("num_batch", 4)
         self.batch_size = self.num_envs * self.steps_num // self.num_batch
-        self.name = cfg["params"]["config"].get("name", "Ant")
+        self.name = cfg["params"]["config"].get("name", "df_ant_shac")
 
         self.truncate_grad = cfg["params"]["config"]["truncate_grads"]
         self.grad_norm = cfg["params"]["config"]["grad_norm"]
@@ -184,31 +144,27 @@ class SHAC:
             self.steps_num = self.env.episode_length
 
         # create actor critic network
-        self.actor_name = cfg["params"]["network"].get(
-            "actor", "ActorStochasticMLP"
-        )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
-        self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
-        actor_fn = getattr(actor_models, self.actor_name)
-        self.actor = actor_fn(
-            self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
+        self.actor = instantiate(
+            cfg["params"]["network"]["actor"],
+            num_obs=self.num_obs,
+            num_actions=self.num_actions,
+            device=self.device,
         )
-        critic_fn = getattr(critic_models, self.critic_name)
-        self.critic = critic_fn(
-            self.num_obs, cfg["params"]["network"], device=self.device
+        self.critic = instantiate(
+            cfg["params"]["network"]["critic"],
+            num_obs=self.num_obs,
+            num_actions=self.num_actions,
+            device=self.device,
         )
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
         # initialize optimizer
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.actor_lr,
+        self.actor_optimizer = instantiate(
+            cfg["params"]["actor_optimizer"], params=self.actor.parameters()
         )
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.critic_lr,
+        self.critic_optimizer = instantiate(
+            cfg["params"]["critic_optimizer"], params=self.critic.parameters()
         )
 
         if cfg["params"]["general"]["train"]:
@@ -309,8 +265,14 @@ class SHAC:
         next_values = torch.zeros(
             (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
         )
+        next_values_model_free = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        actor_model_free_loss = torch.tensor(
+            0.0, dtype=torch.float32, device=self.device
+        )
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -333,6 +295,9 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             actions = self.actor(obs, deterministic=deterministic)
+            self.mus[i, :], _, self.sigmas[i, :] = self.actor.forward_with_dist(
+                obs, deterministic=False
+            )
 
             obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
 
@@ -363,6 +328,10 @@ class SHAC:
 
             next_values[i + 1] = torch.minimum(
                 self.critic(obs).squeeze(-1), self.target_critic(obs).squeeze(-1)
+            )
+            next_values_model_free[i + 1] = torch.minimum(
+                self.critic(obs.requires_grad_(False)).squeeze(-1),
+                self.target_critic(obs.require_grad_(False)).squeeze(-1),
             )
 
             for id in done_env_ids:
@@ -403,14 +372,21 @@ class SHAC:
                     * gamma[done_env_ids]
                     * next_values[i + 1, done_env_ids]
                 ).sum()
+                actor_model_free_loss += (
+                    -rew_acc[i + 1, done_env_ids].detach()
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values_model_free[i + 1, done_env_ids]
+                ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
-                actor_loss = (
-                    actor_loss
-                    + (
-                        -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
-                    ).sum()
-                )
+                actor_loss += (
+                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
+                ).sum()
+                actor_model_free_loss += (
+                    -rew_acc[i + 1, :].detach()
+                    - self.gamma * gamma * next_values_model_free[i + 1, :]
+                ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
@@ -470,15 +446,18 @@ class SHAC:
                         self.episode_gamma[done_env_id] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
+        actor_model_free_loss /= self.steps_num * self.num_envs
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
+            actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().cpu().item()
+        self.actor_model_free_loss = actor_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
 
-        return actor_loss
+        return actor_loss, actor_model_free_loss
 
     @torch.no_grad()
     def evaluate_policy(self, num_games, deterministic=False):
@@ -645,7 +624,7 @@ class SHAC:
             # TODO: use autoscaling for mixed precision
 
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-                actor_loss = self.compute_actor_loss()
+                actor_loss, actor_model_free_loss = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
@@ -688,10 +667,6 @@ class SHAC:
 
             # learning rate schedule
             if self.lr_schedule == "linear":
-                # av_kls = torch_ext.mean_list(ep_kls)
-                # if self.multi_gpu:
-                #     dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
-                #     av_kls /= self.rank_size
                 if self.rank == 0:
                     actor_lr, _ = self.scheduler.update(
                         actor_lr, None, self.curr_epoch, None, None
@@ -712,6 +687,19 @@ class SHAC:
                 for param_group in self.actor_optimizer.param_groups:
                     param_group["lr"] = actor_lr
                 lr = actor_lr
+            elif self.lr_schedule == "adaptive":
+                av_kls = torch_ext.mean_list(ep_kls)
+                if self.multi_gpu:
+                    dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
+                    av_kls /= self.rank_size
+                kl_dist = torch_ext.policy_kl(
+                    self.mus.detach(),
+                    self.sigmas.detach(),
+                    self.old_mus,
+                    self.old_sigmas,
+                    reduce=True,
+                )
+
             else:
                 lr = self.actor_lr
 

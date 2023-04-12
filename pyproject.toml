@@ -1,2 +1,6 @@
 [tool.black]
 exclude = ["."]
+
+[tool.pyright]
+venvPath = "$(pyenv root)/versions/miniconda3/envs"
+venv = "shac"

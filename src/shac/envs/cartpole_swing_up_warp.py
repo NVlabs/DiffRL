@@ -125,7 +125,7 @@ class CartPoleSwingUpWarpEnv(WarpEnv):
         self.builder = wp.sim.ModelBuilder()
 
         for i in range(self.num_envs):
-            self.builder.add_builder(
+            self.builder.add_rigid_articulation(
                 self.articulation_builder,
                 xform=wp.transform(
                     np.array((0.0, 2.5, self.env_dist * i)),
