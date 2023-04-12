@@ -5,12 +5,24 @@ import seaborn as sns
 
 sns.set()
 
-filename = "HopperEnv_grads_100.npz"
+# filename = "HopperEnv_grads_100.npz"
+filename = "CartPoleSwingUpEnv_grads_200.npz"
+print("Loading", filename)
 
 data = np.load(filename)
 fobgs = data["fobgs"].squeeze()
 zobgs = data["zobgs"].squeeze()
 zobgs = np.nan_to_num(zobgs)
+zobgs_analytical = (
+    data["zobgs_analytical"].squeeze()
+    if "zobgs_analytical" in data and data["zobgs_analytical"]
+    else None
+)
+zobgs_no_grad = data["zobgs_no_grad"].squeeze() if "zobgs_no_grad" in data else None
+if zobgs_analytical is not None:
+    print("Found analyical!")
+if zobgs_no_grad is not None:
+    print("Found no grad!")
 
 print(
     "Loaded grads with max H={:} and {:} samples".format(zobgs.shape[0], zobgs.shape[1])

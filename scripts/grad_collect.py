@@ -12,16 +12,16 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env = instantiate(config.env)
+    env = instantiate(config.env.config)
 
     # create a random set of actions
     std = 0.5
-    w = torch.normal(0.0, std, (config.env.num_envs, env.num_acts)).to(device)
+    w = torch.normal(0.0, std, (env.num_envs, env.num_acts)).to(device)
     w[0] = w[0].zero_()
     fobgs = []
     zobgs = []
 
-    for h in range(1, config.env.episode_length):
+    for h in tqdm(range(1, env.episode_length)):
         print("h={:}".format(h))
         env.clear_grad()
         env.reset()
@@ -29,7 +29,7 @@ def main(config: DictConfig):
         ww = w.clone()
         ww.requires_grad_(True)
 
-        loss = torch.zeros(config.env.num_envs).to(device)
+        loss = torch.zeros(env.num_envs).to(device)
 
         # apply first noisy action
         obs, rew, done, info = env.step(ww)
@@ -39,6 +39,11 @@ def main(config: DictConfig):
         for t in range(1, h):
             obs, rew, done, info = env.step(torch.zeros_like(ww))
             loss += rew
+            # NOTE: commented out code below is for the debugging of more efficient grad computation
+            # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("correct_graph")
+            # loss.sum().backward(retain_graph=True)
+            # print(ww.grad)
+            # exit(1)
 
         loss.sum().backward()
 
@@ -49,7 +54,7 @@ def main(config: DictConfig):
         zobgs.append(zobg.detach().cpu().numpy())
 
     np.savez(
-        "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length),
+        "{:}_grads_{:}".format(env.__class__.__name__, env.episode_length),
         zobgs=np.array(zobgs),
         fobgs=np.array(fobgs),
     )

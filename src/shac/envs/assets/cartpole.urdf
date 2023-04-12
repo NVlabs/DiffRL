@@ -73,7 +73,7 @@
 
   <joint name="cart_to_pole" type="continuous">
     <axis xyz="0 1 0"/>
-    <origin xyz="0.0 0.0 0"/>
+    <origin xyz="0.0 0.0 0" rpy="0. 3.1415 0."/>
     <parent link="cart"/>
     <child link="pole"/>
     <limit effort="1000.0" velocity="5"/>

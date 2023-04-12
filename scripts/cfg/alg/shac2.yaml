@@ -1,0 +1,68 @@
+name: shac2
+params:
+  network:
+    actor: 
+      __target__: actor_models.ActorStochasticMLP # ActorDeterministicMLP
+      obs_dim: ???
+      action_dim: ???
+      device: ???
+      cfg_network:
+        actor_mlp:
+          units: ${resolve_default:(64, 64),${......env.actor_mlp.units}}
+          activation: elu
+
+    critic:
+      __target__: critic_models.CriticMLP
+      obs_dim: ???
+      # action_dim: ???
+      device: ???
+      cfg_network:
+        critic_mlp:
+          units: ${resolve_default:(64, 64),${......env.critic_mlp.units}}
+          activation: elu
+
+  config:
+    name: ${....env.name}_${name}
+    actor_optimizer: ${..default_actor_opt}
+    critic_optimizer: ${..default_critic_opt}
+    lr_schedule: linear # ['constant', 'linear']
+    target_critic_alpha: ${resolve_default:0.2,${....env.target_critic_alpha}}
+    obs_rms: True
+    ret_rms: False
+    critic_iterations: 16
+    critic_method: td-lambda # ['td-lambda', 'one-step']
+    lambda: 0.95
+    num_batch: 4
+    gamma: 0.99
+    max_epochs: ${resolve_default:2000,${....env.max_epochs}}
+    steps_num: ${resolve_default:32,${....env.shac.steps_num}}
+    grad_norm: 1.0
+    truncate_grads: True
+    save_interval: ${resolve_default:400,${....env.save_interval}}
+
+    player:
+      determenistic: True
+      games_num: ${resolve_default:1,${.....env.games_num}}
+      num_actors: ${resolve_default:1,${.....env.player.num_actors}}
+      print_stats: True
+
+  default_actor_opt:
+    __target__: torch.optim.Adam
+    lr: ${resolve_default:2e-3,${....env.shac.actor_lr}} # adam
+    betas: ${resolve_default:(0.7, 0.95),...env.shac.betas} # adam
+
+  default_critic_opt:
+    __target__: torch.optim.Adam
+    lr: ${resolve_default:2e-3,${....env.shac.critic_lr}} # adam
+    betas: ${resolve_default:(0.7, 0.95),....env.shac.betas} # adam
+
+  default_adaptive_scheduler:
+    __target__: schedulers.AdaptiveScheduler
+    kl_threshold: 0.008
+
+  default_linear_scheduler:
+    __target__: schedulers.LinearScheduler
+    start_lr: ${..default_actor_opt.lr}
+    min_lr: 1e-5
+    max_steps: ${..config.max_epochs}
+    apply_to_entropy: False

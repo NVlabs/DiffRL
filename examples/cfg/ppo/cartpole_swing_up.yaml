@@ -36,7 +36,7 @@ params:
         name: None
 
   load_checkpoint: False
-  load_path: nn/df_cartpole_swing.pth
+  load_path: nn/df_cartpole_swing_up_ppo.pth
 
   config:
     name: df_cartpole_swing_up

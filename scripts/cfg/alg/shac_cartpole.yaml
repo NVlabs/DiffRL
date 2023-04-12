@@ -4,7 +4,6 @@ params:
     name: CartPoleSwingUpEnv
     stochastic_env: True
     episode_length: 240
-    MM_caching_frequency: 4
 
   network:
     actor: ActorStochasticMLP #ActorDeterministicMLP

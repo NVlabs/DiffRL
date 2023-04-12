@@ -9,6 +9,7 @@ from multiprocessing.sharedctypes import Value
 import sys, os
 
 from torch.nn.utils.clip_grad import clip_grad_norm_
+from hydra.utils import instantiate
 
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
@@ -49,23 +50,8 @@ class SHAC:
         )
         config.update(cfg["params"].get("diff_env", {}))
         seeding(config["seed"])
-        if env_name.lower().find("warp") < 0:
-            config["MM_caching_frequency"] = cfg["params"]["diff_env"].get(
-                "MM_caching_frequency", 1
-            )
-        if env_name == "ClawWarpEnv":
-            from dmanip.config import ClawWarpConfig
 
-            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
-            self.env = env_fn(ClawWarpConfig(**config))
-        elif env_name == "AllegroWarpEnv":
-            from dmanip.config import AllegroWarpConfig
-
-            env_fn.sub_length = cfg["params"]["config"]["steps_num"]
-            self.env = env_fn(AllegroWarpConfig(**config))
-
-        else:
-            self.env = env_fn(**config)
+        self.env = env_fn(**config)
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
@@ -336,23 +322,17 @@ class SHAC:
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
             if i < self.steps_num - 1:
-                actor_loss = (
-                    actor_loss
-                    + (
-                        -rew_acc[i + 1, done_env_ids]
-                        - self.gamma
-                        * gamma[done_env_ids]
-                        * next_values[i + 1, done_env_ids]
-                    ).sum()
-                )
+                actor_loss += (
+                    -rew_acc[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values[i + 1, done_env_ids]
+                ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
-                actor_loss = (
-                    actor_loss
-                    + (
-                        -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
-                    ).sum()
-                )
+                actor_loss += (
+                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
+                ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
