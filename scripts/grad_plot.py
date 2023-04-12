@@ -59,7 +59,6 @@ f.suptitle(filename.replace(".npz", ""))
 # 1. Plot bias
 hh = np.arange(H) + 1
 diff = zobgs.mean(axis=1) - fobgs.mean(axis=1)
-print("diff shape", diff.shape)
 bias_l2 = norm(diff, ord=2, axis=-1)
 bias_l1 = norm(diff, ord=1, axis=-1)
 ax[0, 0].plot(hh, bias_l2, label="L2 Bias")

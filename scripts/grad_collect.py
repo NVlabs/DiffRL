@@ -16,11 +16,14 @@ def main(config: DictConfig):
     # create environment
     env = instantiate(config.env)
 
-    # create a random set of actions
-    std = 0.5
     n = env.num_obs
     m = env.num_acts
-    w = torch.normal(0.0, std, (config.env.num_envs, env.num_acts)).to(device)
+    N = env.num_envs
+    H = env.episode_length
+
+    # create a random set of actions
+    std = 0.5
+    w = torch.normal(0.0, std, (N, m)).to(device)
     w[0] = w[0].zero_()
     fobgs = []
     zobgs = []
@@ -53,13 +56,16 @@ def main(config: DictConfig):
         losses.append(loss.detach().cpu().numpy())
         baseline.append(loss[0].detach().cpu().numpy())
 
+        # get First-order Batch Gradients (FoBGs)
         fobgs.append(ww.grad.cpu().numpy())
 
-        # now get ZoBGs
+        # get Zero-order Batch Gradients (ZoBGs)
         zobg = 1 / std**2 * (loss.unsqueeze(1) - loss[0]) * ww
         zobgs.append(zobg.detach().cpu().numpy())
 
     filename = "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length)
+    if "warp" in config.env._target_:
+        filename = "Warp" + filename
     filename = f"outputs/grads/{filename}"
     if hasattr(env, "start_state"):
         filename += "_" + str(env.start_state)
