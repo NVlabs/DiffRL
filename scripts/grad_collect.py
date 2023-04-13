@@ -14,7 +14,7 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env = instantiate(config.env.config)
+    env = instantiate(config.env)
 
     n = env.num_obs
     m = env.num_acts

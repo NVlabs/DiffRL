@@ -7,3 +7,4 @@ episode_length: 200
 no_grad: False
 stochastic_init: False
 early_termination: False
+ag_return_body: True
