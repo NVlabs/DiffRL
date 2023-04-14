@@ -1,14 +1,29 @@
-name: shac
+name: shac2
 channels:
   - pytorch
   - defaults
+  - nvidia
 dependencies:
-  - python=3.8.13=h12debd9_0
-  - pytorch=1.11.0=py3.8_cuda11.3_cudnn8.2.0_0
-  - torchvision=0.12.0=py38_cu113
+  - python=3.8
+  # - pytorch=1.11.0=py3.8_cuda11.3_cudnn8.2.0_0
+  - pytorch=1.13.1=py3.8_cuda11.7_cudnn8.5.0_0
+  # - torchvision=0.12.0=py38_cu113
+  - torchvision=0.14.1=py38_cu117
+  - cuda-toolkit=11.7P
+  - cuda=11.7
+  - pandas
+  - matplotlib
+  - seaborn
+  - pip
   - pip:
-    - pyyaml==6.0
-    - tensorboard==2.8.0
-    - tensorboardx==2.5
-    - urdfpy==0.0.22
-    - usd-core==22.3
+      #     - pyyaml==6.0
+      #     - tensorboard==2.8.0
+      #     - tensorboardx==2.5
+      - urdfpy==0.0.22
+      #     - usd-core==22.3
+      #     - clearml
+      #     - wandb
+      - hydra-core
+      - tqdm
+      - pytinydiffsim
+      - torchviz

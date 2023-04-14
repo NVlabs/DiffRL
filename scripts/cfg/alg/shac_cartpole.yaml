@@ -16,6 +16,13 @@ params:
       units: [64, 64]
       activation: elu
 
+  general:
+    device: ${general.device}
+    seed: ${general.seed}
+    render: ${general.render}
+    train: ${general.train}
+    logdir: ${general.logdir}
+
   config:
     name: df_cartpole_swing_up_shac
     actor_learning_rate: 1e-3 # adam
