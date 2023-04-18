@@ -21,7 +21,6 @@ def main(config: DictConfig):
     N = env.num_envs
     H = env.episode_length
 
-
     # create a random set of actions
     std = 0.5
     w = torch.normal(0.0, std, (N, m)).to(device)
@@ -62,7 +61,9 @@ def main(config: DictConfig):
         zobg = 1 / std**2 * (loss.unsqueeze(1) - loss[0]) * ww
         zobgs.append(zobg.detach().cpu().numpy())
 
-    filename = "{:}_grads2_{:}".format(env.__class__.__name__, config.env.episode_length)
+    filename = "{:}_grads2_{:}".format(
+        env.__class__.__name__, config.env.episode_length
+    )
     if "warp" in config.env._target_:
         filename = "Warp" + filename
     filename = f"outputs/grads/{filename}"

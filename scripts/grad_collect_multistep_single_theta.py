@@ -7,7 +7,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torchviz import make_dot
-from shac.envs import DFlexEnv, WarpEnv
+from shac.envs import DFlexEnv
+from warp.envs import WarpEnv
 
 
 @hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
@@ -16,7 +17,7 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env: Union[DFlexEnv, WarpEnv] = instantiate(config.env.config)
+    env: Union[DFlexEnv, WarpEnv] = instantiate(config.env)
 
     n = env.num_obs
     m = env.num_acts
@@ -47,16 +48,12 @@ def main(config: DictConfig):
 
     for h in tqdm(range(1, H)):
         env.clear_grad()
-        obs_hist = torch.empty((h, N, n)).to(device)
         obs = env.reset()
-        obs_hist[0] = obs.clone()
         loss = torch.zeros(N).to(device)
 
         # let episode play out
         for t in range(0, h):
             obs, rew, done, info = env.step(policy(obs) + w[t])
-            if t + 1 < h:
-                obs_hist[t + 1] = obs.clone()
             loss += rew
             # NOTE: commented out code below is for the debugging of more efficient grad computation
             # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("correct_graph")
@@ -66,9 +63,15 @@ def main(config: DictConfig):
 
         # get FoBGs per environment
         # This here is a more efficient attempt at computing batch gradients which still doesn't work
-        (grads,) = torch.autograd.grad(
-            loss.sum(), (th,), (torch.ones_like(loss),), is_grads_batched=True
-        )
+        # (grads,) = torch.autograd.grad(
+        #     loss.sum(), (th,), (torch.ones_like(loss),), is_grads_batched=True
+        # )
+
+        grads = []
+        for i in range(N):
+            (grad,) = torch.autograd.grad(loss[i], (th,), retain_graph=True)
+            grads.append(grad)
+        grads = torch.stack(grads)
         print(grads.shape)
         print(grads)
         exit(1)
