@@ -2,13 +2,10 @@ import traceback
 import hydra, os, wandb, yaml
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
+from shac.utils import custom_resolvers
 from shac.algorithms.shac import SHAC
 from shac.algorithms.shac2 import SHAC as SHAC2
 from shac.utils.common import *
-
-# OmegaConf.register_new_resolver(
-#     "resolve_default", lambda default, arg: default if arg == "" else arg
-# )
 
 
 def create_wandb_run(wandb_cfg, job_config, run_id=None, run_wandb=False):
@@ -80,7 +77,10 @@ def train(cfg: DictConfig):
                 OmegaConf.to_yaml(cfg.general)
             )
             print(cfg_train["params"]["general"])
-            traj_optimizer = alg_cls(cfg_train)
+            if alg_cls == SHAC2:
+                traj_optimizer = alg_cls(cfg)
+            else:
+                traj_optimizer = alg_cls(cfg_train)
 
             if not cfg.general.play:
                 traj_optimizer.train()

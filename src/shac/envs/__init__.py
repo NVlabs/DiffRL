@@ -14,6 +14,7 @@ from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
 from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv as CartPoleSwingUpWarpEnv
+from warp.envs.hopper import HopperEnv as HopperWarpEnv
 
 # dmanip envs
 try:

@@ -3,7 +3,7 @@ config:
   _target_: shac.envs.CartPoleSwingUpWarpEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 1024
+  num_envs: ${resolve_fefault:1024,${general.num_envs}}
   seed: ${general.seed}
   episode_length: 240
   no_grad: ${general.play}

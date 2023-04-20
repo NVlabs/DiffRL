@@ -1,4 +1,4 @@
-name: shac
+name: shac2
 params:
   diff_env:
     name: CartPoleSwingUpWarpEnv

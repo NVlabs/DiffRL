@@ -12,6 +12,7 @@ config:
 
 actor_mlp:
   units: [128, 64, 64]
+
 actor_lr: 2e-3
 critic_lr: 2e-3
 max_epochs: 2000

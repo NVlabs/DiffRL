@@ -17,6 +17,8 @@ shac:
   critic_lr: 1e-2
   max_epochs: 500
   betas: (0.7, 0.95)
+  actor_mlp:
+    units: [128, 128]
 
 ppo:
   max_epochs: 500 

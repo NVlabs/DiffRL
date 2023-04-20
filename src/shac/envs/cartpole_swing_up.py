@@ -42,6 +42,7 @@ class CartPoleSwingUpEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=1,
         early_termination=False,
+        stage_path=None,
     ):
         num_obs = 5
         num_act = 1
@@ -77,8 +78,10 @@ class CartPoleSwingUpEnv(DFlexEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
+            if stage_path is None:
+                stage_path = self.__class__.__name__
             filename = os.path.join(
-                "outputs", "{:}_{:}.usd".format(self.__class__.__name__, self.num_envs)
+                "outputs", "{:}_{:}.usd".format(stage_path, self.num_envs)
             )
             self.stage = Usd.Stage.CreateNew(filename)
             self.renderer = df.render.UsdRenderer(self.model, self.stage)

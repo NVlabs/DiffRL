@@ -1,7 +1,7 @@
 defaults:
   - _self_
-  - alg: shac
   - env: cartpole
+  - alg: shac
 
 hydra:
   sweep:
@@ -24,6 +24,33 @@ general:
   seed: 0
   train: True
   checkpoint:
+  multi_gpu: False
+
+
+# env-specific defaults for different algs
+env:
+  gamma: 0.99
+  lambda: 0.95
+  player:
+    games_num: 12
+    num_actors: 4
+
+  shac:
+    actor_mlp:
+      units:
+        - 64
+        - 64
+    critic_mlp:
+      units:
+        - 64
+        - 64
+    target_critic_alpha: 0.2
+    actor_lr: 1e-3
+    critic_lr: 1e-3
+    max_epochs: 2000
+    save_interval: 400
+    steps_num: 32
+    betas: (0.7, 0.95)
 
 wandb:
   project: shac
