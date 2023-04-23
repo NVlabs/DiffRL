@@ -15,7 +15,15 @@ def norm_variance(arr: np.ndarray):
     )
 
 
-filename = "outputs/grads/HopperEnv_grads_124.npz"
+def max_variance(arr: np.ndarray):
+    assert len(arr.shape) == 3, arr.shape
+    return np.max(
+        norm(arr - np.mean(arr, axis=1, keepdims=True), ord=2, axis=-1) ** 2,
+        axis=1,
+    )
+
+
+filename = "outputs/grads/bounce_grads_50.npz"
 print("Loading", filename)
 
 data = np.load(filename)
@@ -28,7 +36,13 @@ zobgs_no_grad = data["zobgs_no_grad"] if "zobgs_no_grad" in data else None
 if zobgs_no_grad is not None:
     print("Found no grad!")
 
-H = zobgs.shape[0]
+if hasattr(data, "h"):
+    hh = data["h"]
+    H = len(hh)
+else:
+    H = zobgs.shape[0]
+    hh = np.arange(H)
+
 N = zobgs.shape[1]
 th_dim = zobgs.shape[2]
 n = data["n"]
@@ -57,7 +71,6 @@ f, ax = plt.subplots(2, 2, figsize=(12, 8))
 f.suptitle(filename.replace(".npz", ""))
 
 # 1. Plot bias
-hh = np.arange(H) + 1
 diff = zobgs.mean(axis=1) - fobgs.mean(axis=1)
 bias_l2 = norm(diff, ord=2, axis=-1)
 bias_l1 = norm(diff, ord=1, axis=-1)
