@@ -3,7 +3,7 @@ config:
   _target_: shac.envs.CartPoleSwingUpWarpEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: ${resolve_fefault:1024,${general.num_envs}}
+  num_envs: 1024
   seed: ${general.seed}
   episode_length: 240
   no_grad: ${general.play}
@@ -16,7 +16,13 @@ shac:
   actor_lr: 1e-3
   critic_lr: 1e-2
   max_epochs: 500
-  betas: (0.7, 0.95)
+  betas: 
+    - 0.7
+    - 0.95
+
+
+shac2:
+  critic_lr: 1e-3
 
 ppo:
   max_epochs: 500 

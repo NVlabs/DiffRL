@@ -20,11 +20,12 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: True
+  run_wandb: False
   seed: 0
   train: True
   checkpoint:
   multi_gpu: False
+  mixed_precision: False
 
 
 # env-specific defaults for different algs
@@ -50,7 +51,11 @@ env:
     max_epochs: 2000
     save_interval: 400
     steps_num: 32
-    betas: (0.7, 0.95)
+    betas: 
+      - 0.7
+      - 0.95
+
+  shac2: ${.shac}
 
 wandb:
   project: shac
