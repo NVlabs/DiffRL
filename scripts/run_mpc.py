@@ -2,6 +2,7 @@ import hydra
 from tqdm import trange
 import shac.algorithms.mpc
 import matplotlib.pyplot as plt
+import numpy as np
 from shac.utils import custom_resolvers
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf

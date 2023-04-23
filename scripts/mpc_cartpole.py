@@ -1,6 +1,6 @@
 # coding: utf-8
 from shac.algorithms.mpc import Policy, Planner
-from shac.envs.cartpole_swing_up import CartPoleSwingUpEnv
+from warp.envs.cartpole_swing_up import CartPoleSwingUpEnv
 import numpy as np
 from tqdm import trange
 
