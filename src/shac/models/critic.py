@@ -64,4 +64,4 @@ class QCriticMLP(nn.Module):
         print(self.q_function)
 
     def forward(self, observations, actions):
-        return self.q_function(torch.cat([observations, actions], dim=1))
+        return self.q_function(torch.cat([observations, actions], dim=-1))

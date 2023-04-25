@@ -15,7 +15,7 @@ resume_model: null
 
 general:
   play: False
-  logdir: logs/tmp/shac/
+  logdir: logs/${alg.name}/${env.name}/
   save_interval: False
   no_time_stamp: False
   render: False

@@ -12,15 +12,13 @@ import os
 import sys
 import time
 
-import yaml
-
 import torch
 from omegaconf import DictConfig, OmegaConf
 from rl_games.common import schedulers
 from rl_games.algos_torch import torch_ext
 from shac.utils.average_meter import AverageMeter
 from shac.utils.common import *
-from shac.utils.dataset import CriticDataset, CriticQDataset
+from shac.utils.dataset import QCriticDataset
 from shac.utils.running_mean_std import RunningMeanStd
 from shac.utils.time_report import TimeReport
 from shac.models import actor as actor_models
@@ -29,6 +27,7 @@ import shac.utils.torch_utils as tu
 from tensorboardX import SummaryWriter
 import torch.distributed as dist
 from torch.nn.utils.clip_grad import clip_grad_norm_
+
 
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
@@ -72,7 +71,6 @@ class SHAC:
 
         self.steps_num = cfg.alg.params.config.steps_num
         self.max_epochs = cfg.alg.params.config.max_epochs
-        __import__("ipdb").set_trace()
         self.actor_lr = float(cfg.env.shac2.actor_lr)
         self.critic_lr = float(cfg.env.shac2.critic_lr)
         self.lr_schedule = cfg.alg.params.config.lr_schedule
@@ -234,12 +232,12 @@ class SHAC:
         rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
-        next_values_model_free = torch.zeros(
-            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
-        )
+        # next_values_model_free = torch.zeros(
+        #     (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        # )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
-        actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        # actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -260,9 +258,12 @@ class SHAC:
             # collect data for critic training
             with torch.no_grad():
                 self.obs_buf[i] = obs.clone()
+
             # normalized sampled action: pi(s)
-            actions = torch.tanh(self.actor(obs, deterministic=deterministic))
-            self.act_buf[i] = actions
+            actions = self.actor(obs, deterministic=deterministic)
+
+            with torch.no_grad():
+                self.act_buf[i] = actions.clone()
 
             if self.curr_epoch > 1:
                 self.old_mus[:] = self.mus.clone()
@@ -273,7 +274,7 @@ class SHAC:
                 self.old_mus[:] = self.mus.clone()
                 self.old_sigmas[:] = self.sigmas.clone()
 
-            obs, rew, done, extra_info = self.env.step(actions)
+            obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
 
             with torch.no_grad():
                 raw_rew = rew.clone()
@@ -291,7 +292,7 @@ class SHAC:
             if self.ret_rms is not None:
                 # update ret rms
                 with torch.no_grad():
-                    self.ret = self.ret * self.gamma + rew
+                    self.ret[:] = self.ret * self.gamma + rew
                     self.ret_rms.update(self.ret)
 
                 rew = rew / torch.sqrt(ret_var + 1e-6)
@@ -300,11 +301,11 @@ class SHAC:
 
             self.episode_length += 1
 
-            done = done | extra_info.get("contact_changed", torch.zeros_like(done))
+            # done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            next_values[i + 1] = self.target_critic(obs, actions).squeeze(-1)
-            next_values_model_free[i + 1] = self.target_critic(obs.detach(), actions).squeeze(-1)
+            next_values[i + 1] = self.target_critic(obs, torch.tanh(actions)).squeeze(-1)
+            # next_values_model_free[i + 1] = self.target_critic(obs.detach(), actions).squeeze(-1)
             # next_values_model_free[i + 1] = torch.minimum(
             #     self.critic(obs.requires_grad_(False), actions).squeeze(-1),
             #     self.target_critic(obs.require_grad_(False), actions).squeeze(-1),
@@ -312,6 +313,7 @@ class SHAC:
 
             # zero next_values for done envs with inf, nan, or >1e6 values in obs_before_reset
             # or early termination
+
             if done_env_ids.shape[0] > 0:
                 zero_next_values = torch.where(
                     torch.isnan(extra_info["obs_before_reset"][done_env_ids]).any(dim=-1)
@@ -322,20 +324,21 @@ class SHAC:
                     torch.zeros_like(done_env_ids, dtype=bool),
                 )
                 zero_next_values, assign_next_values = done_env_ids[zero_next_values], done_env_ids[~zero_next_values]
-                next_values[i + 1, zero_next_values] = 0.0
-                next_values_model_free[i + 1, zero_next_values] = 0.0
+                if zero_next_values.shape[0] > 0:
+                    next_values[i + 1, zero_next_values] = 0.0
+                    # next_values_model_free[i + 1, zero_next_values] = 0.0
                 # use terminal value critic to estimate the long-term performance
-                if self.obs_rms is not None:
-                    real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
-                    real_actions = actions[assign_next_values]
-                else:
-                    real_obs = extra_info["obs_before_reset"][assign_next_values]
-                    real_actions = actions[assign_next_values]
-                next_values[i + 1, assign_next_values] = self.critic(real_obs, real_actions).squeeze(-1)
-                next_values_model_free[i + 1, assign_next_values] = self.critic(
-                    real_obs.detach(), real_actions
-                ).squeeze(-1)
-
+                if assign_next_values.shape[0] > 0:
+                    if self.obs_rms is not None:
+                        real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
+                        real_actions = actions[assign_next_values]
+                    else:
+                        real_obs = extra_info["obs_before_reset"][assign_next_values]
+                        real_actions = actions[assign_next_values]
+                    next_values[i + 1, assign_next_values] = self.critic(real_obs, real_actions).squeeze(-1)
+                    # next_values_model_free[i + 1, assign_next_values] = self.critic(
+                    #     real_obs.detach(), real_actions
+                    # ).squeeze(-1)
             if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
                 print("next value error")
                 if self.multi_gpu:
@@ -348,16 +351,16 @@ class SHAC:
                 actor_loss += (
                     -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
                 ).sum()
-                actor_model_free_loss += (
-                    -rew_acc[i + 1, done_env_ids].detach()
-                    - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
-                ).sum()
+                # actor_model_free_loss += (
+                #     -rew_acc[i + 1, done_env_ids].detach()
+                #     - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
+                # ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
                 actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
-                actor_model_free_loss += (
-                    -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
-                ).sum()
+                # actor_model_free_loss += (
+                #     -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
+                # ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
@@ -374,7 +377,6 @@ class SHAC:
                 else:
                     self.done_mask[i, :] = 1.0
                 self.next_values[i] = next_values[i + 1].clone()
-
             # collect episode loss
             with torch.no_grad():
                 self.episode_loss -= raw_rew
@@ -402,18 +404,18 @@ class SHAC:
                         self.episode_gamma[done_env_id] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
-        actor_model_free_loss /= self.steps_num * self.num_envs
+        # actor_model_free_loss /= self.steps_num * self.num_envs
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
-            actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
+            # actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().cpu().item()
-        self.actor_model_free_loss = actor_loss.detach().cpu().item()
+        # self.actor_model_free_loss = actor_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
 
-        return actor_loss, actor_model_free_loss
+        return actor_loss, None
 
     @torch.no_grad()
     def evaluate_policy(self, num_games, deterministic=False):
@@ -560,7 +562,7 @@ class SHAC:
             # TODO: use autoscaling for mixed precision
 
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-                actor_loss, actor_model_free_loss = self.compute_actor_loss()
+                actor_loss, _ = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
@@ -568,10 +570,13 @@ class SHAC:
             self.time_report.end_timer("backward simulation")
 
             with torch.no_grad():
+                # unscale here to get grad norm before clipping
                 self.scaler.unscale_(self.actor_optimizer)
                 self.grad_norm_before_clip = tu.grad_norm(self.actor.parameters())
-                self.truncate_gradients_and_step(self.actor.parameters(), self.actor_optimizer, unscale=False)
+                self.clip_gradients(self.actor.parameters(), self.actor_optimizer, unscale=False)
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
+                self.scaler.step(self.actor_optimizer)
+                self.scaler.update()
 
                 # sanity check
                 if torch.isnan(self.grad_norm_before_clip) or self.grad_norm_before_clip > 1000000.0:
@@ -586,7 +591,7 @@ class SHAC:
 
             self.time_report.end_timer("compute actor loss")
 
-            return actor_loss
+            return actor_loss.detach().cpu().item()
 
         actor_lr, critic_lr = self.actor_lr, self.critic_lr
         print("starting training: lr = {}, {}".format(actor_lr, critic_lr))
@@ -614,7 +619,7 @@ class SHAC:
                 for param_group in self.actor_optimizer.param_groups:
                     param_group["lr"] = actor_lr
                 lr = actor_lr
-            elif self.lr_schedule == "adaptive" and len(self.ep_kls) > 0:
+            elif self.is_adaptive_lr and len(self.ep_kls) > 0:
                 av_kls = torch_ext.mean_list(self.ep_kls)
                 if self.multi_gpu:
                     dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
@@ -630,10 +635,6 @@ class SHAC:
             # train actor
             self.time_report.start_timer("actor training")
             actor_loss = actor_closure()
-            # self.truncate_gradients_and_step(
-            #     self.actor.parameters(), self.actor_optimizer, unscale=False
-            # )
-            # self.actor_optimizer.step(actor_closure).detach().item()
             self.time_report.end_timer("actor training")
 
             # train critic
@@ -641,7 +642,7 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                dataset = CriticQDataset(
+                dataset = QCriticDataset(
                     self.batch_size,
                     self.obs_buf,
                     self.act_buf,
@@ -649,12 +650,12 @@ class SHAC:
                     drop_last=False,
                 )
                 # compute KL divergence of the current policy
-                self.ep_kls = torch_ext.policy_kl(
-                    self.mus.detach(),
-                    self.sigmas.detach(),
-                    self.old_mus,
-                    self.old_sigmas,
-                )
+                # self.ep_kls = torch_ext.policy_kl(
+                #     self.mus.detach(),
+                #     self.sigmas.detach(),
+                #     self.old_mus,
+                #     self.old_sigmas,
+                # )
 
             self.time_report.end_timer("prepare critic dataset")
 
@@ -674,7 +675,9 @@ class SHAC:
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    self.truncate_gradients_and_step(self.critic.parameters(), self.critic_optimizer)
+                    self.clip_gradients(self.critic.parameters(), self.critic_optimizer)
+                    self.scaler.step(self.actor_optimizer)
+                    self.scaler.update()
 
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
@@ -807,7 +810,7 @@ class SHAC:
         if self.multi_gpu and should_exit:
             dist.destroy_process_group()
 
-    def truncate_gradients_and_step(self, parameters, optimizer, unscale=True):
+    def clip_gradients(self, parameters, optimizer, unscale=True):
         if self.multi_gpu:
             # batch allreduce ops: see https://github.com/entity-neural-network/incubator/pull/220
             all_grads_list = []
@@ -828,9 +831,6 @@ class SHAC:
             if unscale:
                 self.scaler.unscale_(optimizer)
             clip_grad_norm_(parameters, self.grad_norm)
-
-        self.scaler.step(optimizer)
-        self.scaler.update()
 
     def play(self, cfg):
         self.load(cfg.alg.params.general.checkpoint, cfg)
