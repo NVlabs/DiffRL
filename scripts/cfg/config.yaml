@@ -31,12 +31,12 @@ general:
 # env-specific defaults for different algs
 env:
   gamma: 0.99
-  lambda: 0.95
   player:
     games_num: 12
     num_actors: 4
 
   shac:
+    lambda: 0.95
     actor_mlp:
       units:
         - 64

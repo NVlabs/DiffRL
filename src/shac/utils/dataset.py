@@ -43,7 +43,7 @@ class CriticDataset:
 class QCriticDataset:
     def __init__(self, batch_size, obs, act, target_values, shuffle=False, drop_last=False):
         self.obs = obs.view(-1, obs.shape[-1])
-        self.act = torch.tanh(act.view(-1, act.shape[-1]))
+        self.act = act.view(-1, act.shape[-1])
         self.target_values = target_values.view(-1)
         self.batch_size = batch_size
 

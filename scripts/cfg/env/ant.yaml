@@ -13,12 +13,9 @@ config:
 actor_mlp:
   units: [128, 64, 64]
 
-shac2:
+shac:
   actor_lr: 2e-3
   critic_lr: 2e-3
-
-lambda: 0.95
-actor_lr: 2e-3
-critic_lr: 2e-3
-max_epochs: 2000
-num_actors: 64
+  max_epochs: 2000
+  num_actors: 64
+  target_critic_alpha: 0.2

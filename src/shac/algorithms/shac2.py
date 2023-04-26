@@ -150,9 +150,6 @@ class SHAC:
         self.actor_optimizer = instantiate(cfg.alg.params.config.actor_optimizer, params=self.actor.parameters())
         self.critic_optimizer = instantiate(cfg.alg.params.config.critic_optimizer, params=self.critic.parameters())
 
-        if cfg.general.train:
-            self.save("init_policy")
-
         self.mixed_precision = cfg.general.mixed_precision
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
 
@@ -194,6 +191,9 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
+
+        if cfg.general.train:
+            self.save("init_policy")
 
         # counting variables
         self.iter_count = 0
@@ -262,25 +262,25 @@ class SHAC:
             self.old_mus[:] = self.mus.clone()
             self.old_sigmas[:] = self.sigmas.clone()
 
+        self.ep_kls = []
+        next_actions = torch.tanh(self.actor(obs, deterministic=deterministic))
+
         for i in range(self.steps_num):
             # collect data for critic training
             with torch.no_grad():
                 self.obs_buf[i] = obs.clone()
 
             # normalized sampled action: pi(s)
-            actions = self.actor(obs, deterministic=deterministic)
+            actions = next_actions
 
             with torch.no_grad():
                 self.act_buf[i] = actions.clone()
 
             with torch.no_grad():
-                _, self.mus[i, :], self.sigmas[i, :] = self.actor.forward_with_dist(obs, deterministic=False)
+                _, mus_i, sigmas_i = self.actor.forward_with_dist(obs, deterministic=True)
+                self.mus[i, :], self.sigmas[i, :] = mus_i.clone(), sigmas_i.clone()
 
-            if self.curr_epoch == 1:
-                self.old_mus[:] = self.mus.clone()
-                self.old_sigmas[:] = self.sigmas.clone()
-
-            obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
+            obs, rew, done, extra_info = self.env.step(actions)
 
             with torch.no_grad():
                 raw_rew = rew.clone()
@@ -303,15 +303,14 @@ class SHAC:
 
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
-            self.ep_kls = []
-
             self.episode_length += 1
 
             # done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            next_values[i + 1] = self.target_critic(obs, torch.tanh(actions)).squeeze(-1)
-            # next_values_model_free[i + 1] = self.target_critic(obs.detach(), actions).squeeze(-1)
+            next_actions = torch.tanh(self.actor(obs, deterministic=True))
+            next_values[i + 1] = self.target_critic(obs, next_actions).squeeze(-1)
+            # next_values_model_free[i + 1] = self.target_critic(obs.detach(), next_actions.detach()).squeeze(-1)
             # next_values_model_free[i + 1] = torch.minimum(
             #     self.critic(obs.requires_grad_(False), actions).squeeze(-1),
             #     self.target_critic(obs.require_grad_(False), actions).squeeze(-1),
@@ -409,6 +408,11 @@ class SHAC:
                         self.episode_length[done_env_id] = 0
                         self.episode_gamma[done_env_id] = 1.0
 
+        # if first epoch, clone old_mus, sigmas
+        if self.curr_epoch == 1:
+            self.old_mus[:] = self.mus.clone()
+            self.old_sigmas[:] = self.sigmas.clone()
+
         actor_loss /= self.steps_num * self.num_envs
         # actor_model_free_loss /= self.steps_num * self.num_envs
 
@@ -440,9 +444,9 @@ class SHAC:
             if self.obs_rms is not None:
                 obs = self.obs_rms.normalize(obs)
 
-            actions = self.actor(obs, deterministic=deterministic)
+            actions = torch.tanh(self.actor(obs, deterministic=deterministic))
 
-            obs, rew, done, _ = self.env.step(torch.tanh(actions))
+            obs, rew, done, _ = self.env.step(actions)
 
             episode_length += 1
 
@@ -635,10 +639,16 @@ class SHAC:
                     self.actor_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item()
                 )
                 self.critic_lr = self.actor_lr
+                self.ep_kls = []
             else:
                 lr = self.actor_lr
 
             # train actor
+            self.act_buf = torch.zeros(
+                (self.steps_num, self.num_envs, self.num_actions),
+                dtype=torch.float32,
+                device=self.device,
+            )
             self.time_report.start_timer("actor training")
             actor_closure()
             self.time_report.end_timer("actor training")
@@ -656,12 +666,14 @@ class SHAC:
                     drop_last=False,
                 )
                 # compute KL divergence of the current policy
-                # self.ep_kls = torch_ext.policy_kl(
-                #     self.mus.detach(),
-                #     self.sigmas.detach(),
-                #     self.old_mus,
-                #     self.old_sigmas,
-                # )
+                self.ep_kls.append(
+                    torch_ext.policy_kl(
+                        self.mus.detach(),
+                        self.sigmas.detach(),
+                        self.old_mus,
+                        self.old_sigmas,
+                    )
+                )
 
             self.time_report.end_timer("prepare critic dataset")
 
@@ -687,12 +699,16 @@ class SHAC:
 
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
+                    # recompute Q-target
+                    self.compute_target_values()
 
                 self.value_loss = (total_critic_loss / batch_cnt).detach().cpu().item()
                 print(
                     "value iter {}/{}, loss = {:7.6f}".format(j + 1, self.critic_iterations, self.value_loss),
                     end="\r",
                 )
+            del self.act_buf
+            del dataset
 
             self.time_report.end_timer("critic training")
 
@@ -851,34 +867,42 @@ class SHAC:
         if filename is None:
             filename = "best_policy"
         torch.save(
-            [
-                self.actor.state_dict(),
-                self.critic.state_dict(),
-                self.target_critic.state_dict(),
-                self._obs_rms,
-                self.ret_rms,
-                self.actor_optimizer.state_dict(),
-                self.critic_optimizer.state_dict(),
-            ],
+            {
+                "actor": self.actor.state_dict(),
+                "critic": self.critic.state_dict(),
+                "target_critic": self.target_critic.state_dict(),
+                "obs_rms": self._obs_rms,
+                "ret_rms": self.ret_rms,
+                "actor_optimizer": self.actor_optimizer.state_dict(),
+                "critic_optimizer": self.critic_optimizer.state_dict(),
+                "mus": self.mus,
+                "sigmas": self.sigmas,
+                "old_mus": self.old_mus,
+                "old_sigmas": self.old_sigmas,
+            },
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
     def load(self, path, cfg, map_location=None):
         checkpoint = torch.load(path, map_location=map_location)
-        self.actor.load_state_dict(checkpoint[0])
-        self.critic.load_state_dict(checkpoint[1])
+        self.actor.load_state_dict(checkpoint["actor"])
+        self.critic.load_state_dict(checkpoint["critic"])
 
-        self.target_critic.load_state_dict(checkpoint[2])
+        self.target_critic.load_state_dict(checkpoint["target_critic"])
 
-        if checkpoint[3] is not None:
-            self._obs_rms = checkpoint[3]
+        if checkpoint["obs_rms"] is not None:
+            self._obs_rms = checkpoint["obs_rms"]
             self._obs_rms = [x.to(self.device) for x in self._obs_rms]
         else:
             self._obs_rms = None
 
-        self.ret_rms = checkpoint[4].to(self.device) if checkpoint[4] is not None else checkpoint[4]
-        self.actor_optimizer.load_state_dict(checkpoint[5])
-        self.critic_optimizer.load_state_dict(checkpoint[6])
+        self.ret_rms = checkpoint["ret_rms"].to(self.device) if checkpoint["ret_rms"] is not None else None
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
+        self.mus = checkpoint["mus"].to(self.device)
+        self.sigmas = checkpoint["sigmas"].to(self.device)
+        self.old_mus = checkpoint["old_mus"].to(self.device)
+        self.old_sigmas = checkpoint["old_sigmas"].to(self.device)
 
     def resume_from(self, path, cfg, epoch, step_count=None, loss=None):
         self.curr_epoch = epoch

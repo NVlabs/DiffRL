@@ -26,7 +26,7 @@ params:
     ret_rms: False
     critic_iterations: 16
     critic_method: td-lambda # ['td-lambda', 'one-step']
-    lam: ${env.lambda}
+    lam: ${env.shac2.lambda}
     num_batch: 4
     gamma: 0.99
     max_epochs: ${resolve_default:2000,${env.shac2.max_epochs}}

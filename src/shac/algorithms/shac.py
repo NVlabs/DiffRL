@@ -37,6 +37,7 @@ class SHAC:
             stochastic_init = cfg["params"]["diff_env"].pop("stochastic_env")
         else:
             stochastic_init = True
+
         config = dict(
             num_envs=cfg["params"]["config"]["num_actors"],
             device=cfg["params"]["general"]["device"],
@@ -46,10 +47,14 @@ class SHAC:
             stochastic_init=stochastic_init,
             no_grad=False,
         )
+
         config.update(cfg["params"].get("diff_env", {}))
         seeding(config["seed"])
 
         self.env = env_fn(**config)
+        # reset diff_env config for yaml
+        cfg["params"]["diff_env"] = config
+        cfg["params"]["diff_env"]["name"] = env_name
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
@@ -275,6 +280,7 @@ class SHAC:
 
             self.episode_length += 1
 
+            done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             if self.critic_name == "CriticMLP":
@@ -631,6 +637,10 @@ class SHAC:
                 self.writer.add_scalar("episode_lengths/iter", mean_episode_length, self.iter_count)
                 self.writer.add_scalar("episode_lengths/step", mean_episode_length, self.step_count)
                 self.writer.add_scalar("episode_lengths/time", mean_episode_length, time_elapse)
+                ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
+                self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
+                self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
+                self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf

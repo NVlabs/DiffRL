@@ -225,6 +225,10 @@ class AntEnv(DFlexEnv):
             self.obs_buf_before_reset = self.obs_buf.clone()
             self.extras = {"obs_before_reset": self.obs_buf_before_reset, "episode_end": self.termination_buf}
 
+        self.extras["contacts_changed"] = torch.tensor(
+            [self.model.contact_count - self.contact_count != 0] * self.num_envs, device=self.device
+        )
+
         if len(env_ids) > 0:
             self.reset(env_ids)
 
@@ -284,6 +288,8 @@ class AntEnv(DFlexEnv):
     """
 
     def clear_grad(self, checkpoint=None):
+        self.contact_count = self.model.contact_count
+        __import__("ipdb").set_trace()
         with torch.no_grad():
             if checkpoint is None:
                 checkpoint = {}
