@@ -45,7 +45,7 @@ env:
       units:
         - 64
         - 64
-    target_critic_alpha: 0.2
+    target_critic_alpha: 0.4
     actor_lr: 1e-3
     critic_lr: 1e-3
     max_epochs: 2000

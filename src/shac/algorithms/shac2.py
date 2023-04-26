@@ -34,6 +34,8 @@ sys.path.append(project_dir)
 
 
 class SHAC:
+    """SHAC algorithm implementation"""
+
     def __init__(self, cfg: DictConfig):
         seeding(cfg.general.seed)
         self.env = instantiate(cfg.env.config)
@@ -254,6 +256,12 @@ class SHAC:
                 self.obs_rms.update(obs)
             # normalize the current obs
             obs = obs_rms.normalize(obs)
+
+        # copy previous state mus, sigma to old_mus, old_simgas
+        if self.curr_epoch > 1:
+            self.old_mus[:] = self.mus.clone()
+            self.old_sigmas[:] = self.sigmas.clone()
+
         for i in range(self.steps_num):
             # collect data for critic training
             with torch.no_grad():
@@ -265,11 +273,9 @@ class SHAC:
             with torch.no_grad():
                 self.act_buf[i] = actions.clone()
 
-            if self.curr_epoch > 1:
-                self.old_mus[:] = self.mus.clone()
-                self.old_sigmas[:] = self.sigmas.clone()
+            with torch.no_grad():
+                _, self.mus[i, :], self.sigmas[i, :] = self.actor.forward_with_dist(obs, deterministic=False)
 
-            self.mus[i, :], _, self.sigmas[i, :] = self.actor.forward_with_dist(obs, deterministic=False)
             if self.curr_epoch == 1:
                 self.old_mus[:] = self.mus.clone()
                 self.old_sigmas[:] = self.sigmas.clone()
@@ -331,11 +337,11 @@ class SHAC:
                 if assign_next_values.shape[0] > 0:
                     if self.obs_rms is not None:
                         real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
-                        real_actions = actions[assign_next_values]
+                        real_act = actions[assign_next_values]
                     else:
                         real_obs = extra_info["obs_before_reset"][assign_next_values]
-                        real_actions = actions[assign_next_values]
-                    next_values[i + 1, assign_next_values] = self.critic(real_obs, real_actions).squeeze(-1)
+                        real_act = actions[assign_next_values]
+                    next_values[i + 1, assign_next_values] = self.critic(real_obs, real_act).squeeze(-1)
                     # next_values_model_free[i + 1, assign_next_values] = self.critic(
                     #     real_obs.detach(), real_actions
                     # ).squeeze(-1)
@@ -558,15 +564,15 @@ class SHAC:
             self.time_report.start_timer("compute actor loss")
 
             self.time_report.start_timer("forward simulation")
-            # env_state = self.env.get_checkpoint()
-            # TODO: use autoscaling for mixed precision
 
+            # use autoscaling for mixed precision
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
                 actor_loss, _ = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
             self.scaler.scale(actor_loss).backward()
+            # actor_loss.backward()
             self.time_report.end_timer("backward simulation")
 
             with torch.no_grad():
@@ -591,7 +597,7 @@ class SHAC:
 
             self.time_report.end_timer("compute actor loss")
 
-            return actor_loss.detach().cpu().item()
+            return
 
         actor_lr, critic_lr = self.actor_lr, self.critic_lr
         print("starting training: lr = {}, {}".format(actor_lr, critic_lr))
@@ -634,7 +640,7 @@ class SHAC:
 
             # train actor
             self.time_report.start_timer("actor training")
-            actor_loss = actor_closure()
+            actor_closure()
             self.time_report.end_timer("actor training")
 
             # train critic
@@ -750,11 +756,16 @@ class SHAC:
                     mean_policy_discounted_loss,
                     self.iter_count,
                 )
+
                 self.writer.add_scalar("best_policy_loss/step", self.best_policy_loss, self.step_count)
                 self.writer.add_scalar("best_policy_loss/iter", self.best_policy_loss, self.iter_count)
                 self.writer.add_scalar("episode_lengths/iter", mean_episode_length, self.iter_count)
                 self.writer.add_scalar("episode_lengths/step", mean_episode_length, self.step_count)
                 self.writer.add_scalar("episode_lengths/time", mean_episode_length, time_elapse)
+                ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
+                self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
+                self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
+                self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
