@@ -190,13 +190,16 @@ class HopperEnv(DFlexEnv):
 
         self.state.joint_act.view(self.num_envs, -1)[:, 3:] = actions * self.action_strength
 
-        self.state = self.integrator.forward(
+        next_state = self.integrator.forward(
             self.model,
             self.state,
             self.sim_dt,
             self.sim_substeps,
             self.MM_caching_frequency,
         )
+        contacts_changed = next_state.body_f_s.clone().any(dim=1) != self.state.body_f_s.clone().any(dim=1)
+        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
+        self.state = next_state
         self.sim_time += self.sim_dt
 
         self.reset_buf = torch.zeros_like(self.reset_buf)
@@ -215,6 +218,8 @@ class HopperEnv(DFlexEnv):
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
             }
+
+        self.extras["contacts_changed"] = contacts_changed
 
         if len(env_ids) > 0:
             self.reset(env_ids)

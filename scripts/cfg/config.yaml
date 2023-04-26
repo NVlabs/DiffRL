@@ -3,11 +3,6 @@ defaults:
   - env: cartpole
   - alg: shac
 
-hydra:
-  sweep:
-    dir: ${env:HOME}/checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
-
 exp_name: shac_benchmarks
 
 id: ${hydra.job.id}
@@ -20,7 +15,7 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: False
+  run_wandb: True
   seed: 0
   train: True
   checkpoint:
@@ -60,4 +55,4 @@ env:
 wandb:
   project: shac
   group: ${exp_name}
-  sweep_name_prefix: ${alg.diff_env.name}_${alg.name}-run
+  sweep_name_prefix: ${alg.params.config.name}-run

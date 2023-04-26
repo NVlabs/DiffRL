@@ -20,7 +20,7 @@ params:
     name: ${env.name}_${...name}
     actor_optimizer: ${..default_actor_opt}
     critic_optimizer: ${..default_critic_opt}
-    lr_schedule: linear # ['constant', 'linear']
+    lr_schedule: linear # ['constant', 'linear', 'adaptive']
     target_critic_alpha: ${resolve_default:0.4,${env.shac2.target_critic_alpha}}
     obs_rms: True
     ret_rms: False
@@ -56,7 +56,7 @@ params:
 
   default_adaptive_scheduler:
     _target_: rl_games.common.schedulers.AdaptiveScheduler
-    kl_threshold: 0.008
+    kl_threshold : 0.01
 
   default_linear_scheduler:
     _target_: rl_games.common.schedulers.LinearScheduler
