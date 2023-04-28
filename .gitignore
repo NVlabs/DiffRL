@@ -4,6 +4,7 @@
 *.swp
 *.swo
 tags
+**.npy
 
 dflex/dflex/kernels*/
 **logs/
