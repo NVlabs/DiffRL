@@ -125,7 +125,14 @@ class CartPoleSwingUpEnv(DFlexEnv):
                     df.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
                 ),
                 floating=False,
+                armature=0.1,
+                stiffness=0.0,
+                damping=0.0,
+                shape_ke=1e4,
                 shape_kd=1e4,
+                shape_kf=1e2,
+                shape_mu=0.5,
+                limit_ke=1e2,
                 limit_kd=1.0,
             )
             self.builder.joint_q[i * self.num_joint_q] = self.start_state[0]
