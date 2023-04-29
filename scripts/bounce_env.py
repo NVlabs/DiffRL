@@ -45,7 +45,7 @@ class Bounce:
         num_envs=32,
         num_steps=200,
         start_state=np.array([-0.5, 1.0, 0.0]),
-        start_vel=np.array([8.0, -5.0, 0.0]),
+        start_vel=np.array([5.0, -5.0, 0.0]),
         render=False,
         profile=False,
         adapter=None,
@@ -54,6 +54,7 @@ class Bounce:
         self.profile = profile
         self.render = render
         self.num_envs = num_envs
+        self.noise = noise
 
         # sim frequency
         self.frame_steps = num_steps
@@ -109,7 +110,7 @@ class Bounce:
     ):
         i = wp.tid()  # gets current thread id
         delta = pos[i] - target
-        wp.atomic_add(loss, i, wp.dot(delta, delta))
+        loss[i] = wp.dot(delta, delta)
 
     @wp.kernel
     def sum_kernel(
@@ -120,13 +121,20 @@ class Bounce:
         wp.atomic_add(loss, 0, losses[i])
 
     @wp.kernel
+    def mean_kernel(
+        x_in: wp.array(dtype=wp.vec3), x_out: wp.array(dtype=wp.vec3), num_envs: float
+    ):
+        i = wp.tid()
+        wp.atomic_add(x_out, 0, x_in[i] / num_envs)
+
+    @wp.kernel
     def step_kernel(
         x: wp.array(dtype=wp.vec3), grad: wp.array(dtype=wp.vec3), alpha: float
     ):
         tid = wp.tid()  # gets current thread id
 
         # gradient descent step
-        x[tid] = x[tid] - grad[tid] * alpha
+        x[tid] = x[tid] - grad[0] * alpha
 
     @wp.kernel
     def count_contact_changes_kernel(
@@ -156,13 +164,13 @@ class Bounce:
             )
             self.count_contact_changes(i)
 
-            # compute loss on each state
-            wp.launch(
-                self.loss_kernel,
-                dim=self.num_envs,
-                inputs=[self.states[i + 1].particle_q, self.target, self.loss],
-                device=self.device,
-            )
+        # compute loss on final state
+        wp.launch(
+            self.loss_kernel,
+            dim=self.num_envs,
+            inputs=[self.states[-1].particle_q, self.target, self.loss],
+            device=self.device,
+        )
 
         return self.loss
 
@@ -249,82 +257,141 @@ class Bounce:
         print(f"numeric grad: {x_grad_numeric}")
         print(f"analytic grad: {x_grad_analytic}")
 
-        self.render_iter(0)
+        if self.render:
+            self.render_iter(0)
 
         tape.zero()
 
-    def train(self):
-        for i in range(self.train_iters):
+    def trajectory(self):
+        xy = []
+        for state in self.states:
+            xy.append(state.particle_q.numpy())
+        return np.array(xy)
+
+    def train(self, iters, clip=False, norm=False, tol=1e-4):
+        losses = []
+        trajectories = []
+        for i in range(iters):
             tape = wp.Tape()
 
             with wp.ScopedTimer("Forward", active=self.profile):
                 with tape:
                     self.compute_loss()
+                    self.sum_loss()
 
             with wp.ScopedTimer("Backward", active=self.profile):
-                tape.backward(self.loss)
+                tape.backward(self.l)
 
-            with wp.ScopedTimer("Render", active=self.profile):
-                self.render_iter(i)
+            if self.render:
+                with wp.ScopedTimer("Render", active=self.profile):
+                    self.render_iter(i)
 
             with wp.ScopedTimer("Step", active=self.profile):
+                # need to take the mean of first qd
                 x = self.states[0].particle_qd
+                x = x.numpy()
+                x = x.mean(axis=0)
+
+                # need to take the mean of gradients
                 x_grad = tape.gradients[self.states[0].particle_qd]
+                x_grad = x_grad.numpy()
+                x_grad = x_grad.mean(axis=0)
 
-                print(f"Iter: {i} Loss: {self.loss}")
-                print(f"   x: {x} g: {x_grad}")
+                losses.append(self.loss.numpy())
+                trajectories.append(self.trajectory())
 
-                wp.launch(
-                    self.step_kernel,
-                    dim=len(x),
-                    inputs=[x, x_grad, self.train_rate],
-                    device=self.device,
+                print(f"Iter: {i} Loss: {self.l}")
+                print(f"X: {x} Grad: {x_grad}")
+
+                # apply it to the initial state
+                x = x - x_grad * self.train_rate
+
+                # then add noise again and set to environments
+                x = x + self.noise
+                self.states[0].particle_qd = wp.from_numpy(
+                    x, dtype=wp.vec3, requires_grad=True
                 )
 
             tape.zero()
 
-    def train_graph(self):
+            # clear grad and loss for next iteration
+            tape.zero()
+            self.loss = wp.zeros_like(self.loss, requires_grad=True)
+            self.l = wp.zeros_like(self.l, requires_grad=True)
+
+            if len(losses) > 2:
+                if np.abs(losses[-1].mean() - losses[-2].mean()) < tol:
+                    print("Early stopping at iter", i)
+                    break
+
+        return np.array(losses), np.array(trajectories)
+
+    def train_graph(self, iters, clip=False, norm=False, tol=1e-4):
         # capture forward/backward passes
         wp.capture_begin()
 
         tape = wp.Tape()
         with tape:
             self.compute_loss()
+            self.sum_loss()
 
-        tape.backward(self.loss)
+        tape.backward(self.l)
 
         self.graph = wp.capture_end()
 
         # replay and optimize
-        for i in range(self.train_iters):
+        losses = []
+        trajectories = []
+        last_l = 0.0
+
+        for i in range(iters):
             with wp.ScopedTimer("Step", active=self.profile):
                 # forward + backward
                 wp.capture_launch(self.graph)
-                # count number of contact changes:
-                contact_count = self.contact_count.numpy()
-                contact_changes = np.sum(
-                    np.abs(contact_count - self.prev_contact_count)
-                )
-                self.prev_contact_count = contact_count
-                self.contact_count.zero_()
+                # # count number of contact changes:
+                # contact_count = self.contact_count.numpy()
+                # contact_changes = np.sum(
+                #     np.abs(contact_count - self.prev_contact_count)
+                # )
+                # self.prev_contact_count = contact_count
+                # self.contact_count.zero_()
 
                 # gradient descent step
                 x = self.states[0].particle_qd
+                self.x_grad = wp.zeros(1, dtype=wp.vec3)
+
                 wp.launch(
-                    self.step_kernel,
+                    self.mean_kernel,
                     dim=len(x),
-                    inputs=[x, x.grad, self.train_rate],
+                    inputs=[x.grad, self.x_grad, self.num_envs],
                     device=self.device,
                 )
 
-                print(
-                    f"Iter: {i} Loss: {self.loss}, contact_changes: {contact_changes}"
+                print(f"Iter: {i} Loss: {self.l.numpy() - last_l}")
+                print(f"Grad: {self.x_grad}")
+                last_l = self.l.numpy()
+
+                wp.launch(
+                    self.step_kernel,
+                    dim=len(x),
+                    inputs=[x, self.x_grad, self.train_rate],
+                    device=self.device,
                 )
-                print("Gradients", tape.gradients[self.states[0].particle_qd])
-                print("Velocities", self.states[0].particle_qd)
+
+                # logging
+                losses.append(self.loss.numpy())
+                trajectories.append(self.trajectory())
 
                 # clear grads for next iteration
                 tape.zero()
 
-            with wp.ScopedTimer("Render", active=self.profile):
-                self.render_iter(i)
+            if len(losses) > 2:
+                if np.abs(losses[-1].mean() - losses[-2].mean()) < tol:
+                    print("Early stopping at iter", i)
+                    break
+
+            if self.render:
+                with wp.ScopedTimer("Render", active=self.profile):
+                    self.render_iter(i)
+
+        return np.array(losses), np.array(trajectories)

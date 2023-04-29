@@ -37,7 +37,7 @@ def main(config: DictConfig):
     losses = []
     baseline = []
 
-    for h in tqdm(range(H, H + 1)):
+    for h in tqdm(range(1, H + 1)):
         env = Bounce(ww, num_envs=N, num_steps=h, profile=False, render=False)
 
         param = env.states[0].particle_qd
