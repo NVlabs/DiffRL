@@ -1,4 +1,5 @@
 name: df_cartpole
+env_name: CartPoleSwingUpEnv
 
 config:
   _target_: shac.envs.CartPoleSwingUpEnv
@@ -16,9 +17,17 @@ shac:
   actor_lr: 1e-3
   critic_lr: 1e-2
   max_epochs: 500
-  betas: (0.7, 0.95)
+  save_interval: 100
+  steps_num: 32
+  betas: 
+    - 0.7
+    - 0.95
   actor_mlp:
-    units: [128, 128]
+    units: [64, 64]
+  target_critic_alpha: 0.2 
+
+shac2: 
+  critic_lr: 1e-3
 
 ppo:
   max_epochs: 500 
