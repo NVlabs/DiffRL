@@ -20,6 +20,7 @@ def main(config: DictConfig):
     m = env.num_acts
     N = env.num_envs
     H = env.episode_length
+    h_step = 1
 
     # create a random set of actions
     std = 0.5
@@ -30,7 +31,8 @@ def main(config: DictConfig):
     losses = []
     baseline = []
 
-    for h in tqdm(range(1, config.env.episode_length)):
+    hh = np.arange(1, config.env.episode_length + 1, h_step)
+    for h in tqdm(hh):
         env.clear_grad()
         env.reset()
 
@@ -72,6 +74,7 @@ def main(config: DictConfig):
     print("Saving to", filename)
     np.savez(
         filename,
+        h=hh,
         zobgs=zobgs,
         fobgs=fobgs,
         losses=losses,
