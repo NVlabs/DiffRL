@@ -27,6 +27,7 @@ def main(config: DictConfig):
     m = 2
     N = 128
     H = 40
+    clip = 5.0
 
     w = np.random.normal(0.0, std, (N, m))
     w[0] = 0.0  # for baseline
@@ -49,6 +50,13 @@ def main(config: DictConfig):
         tape.backward(l)
         fobg = tape.gradients[param].numpy()
         fobg = fobg[:, :2]
+        # gradient clipping by value
+        # print(np.sum(np.abs(fobg) > clip))
+        # fobg = np.clip(fobg, -clip, clip)
+
+        # gradient clipping by norm
+        # if np.any(fobg > clip):
+        # fobg = clip * fobg / np.linalg.norm(fobg)
         tape.zero()
         loss = loss.numpy()
 
@@ -60,7 +68,7 @@ def main(config: DictConfig):
 
     # env.render_iter(0)  # render last interation
 
-    filename = "bounce_grads_{:}".format(H)
+    filename = "bounce_grads_{:}".format(H, clip)
     filename = f"outputs/grads/{filename}"
     print("Saving to", filename)
     np.savez(

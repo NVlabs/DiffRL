@@ -297,6 +297,12 @@ class Bounce:
                 x_grad = x_grad.numpy()
                 x_grad = x_grad.mean(axis=0)
 
+                if clip:
+                    x_grad = np.clip(x_grad, -clip, clip)
+
+                if norm:
+                    x_grad = norm * x_grad / np.linalg.norm(x_grad)
+
                 losses.append(self.loss.numpy())
                 trajectories.append(self.trajectory())
 

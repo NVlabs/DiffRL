@@ -33,9 +33,22 @@ def main(config: DictConfig):
     ww = np.append(w, np.zeros((N, 1)), axis=1)
 
     env = Bounce(ww, num_envs=N, num_steps=H, profile=False, render=False)
+    losses, trajectories = env.train(200)
 
-    losses, trajectories = env.train_graph(200)
-    np.savez("optim.npz", losses=losses, trajectories=trajectories)
+    env = Bounce(ww, num_envs=N, num_steps=H, profile=False, render=False)
+    losses_clip, trajectories_clip = env.train(200, clip=5.0)
+
+    env = Bounce(ww, num_envs=N, num_steps=H, profile=False, render=False)
+    losses_norm, trajectories_norm = env.train(200, norm=5.0)
+    np.savez(
+        "bounce_optimization.npz",
+        losses=losses,
+        trajectories=trajectories,
+        losses_clip=losses_clip,
+        trajectories_clip=trajectories_clip,
+        losses_norm=losses_norm,
+        trajectories_norm=trajectories_norm,
+    )
 
 
 if __name__ == "__main__":
