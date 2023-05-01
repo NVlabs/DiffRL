@@ -2,13 +2,10 @@ import traceback
 import hydra, os, wandb, yaml
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
+from shac.utils import custom_resolvers
 from shac.algorithms.shac import SHAC
 from shac.algorithms.shac2 import SHAC as SHAC2
 from shac.utils.common import *
-
-# OmegaConf.register_new_resolver(
-#     "resolve_default", lambda default, arg: default if arg == "" else arg
-# )
 
 
 def create_wandb_run(wandb_cfg, job_config, run_id=None, run_wandb=False):
@@ -47,13 +44,9 @@ def train(cfg: DictConfig):
         if os.path.exists("exp_config.yaml"):
             old_config = yaml.load(open("exp_config.yaml", "r"))
             params, wandb_id = old_config["params"], old_config["wandb_id"]
-            run = create_wandb_run(
-                cfg.wandb, params, wandb_id, run_wandb=cfg.general.run_wandb
-            )
+            run = create_wandb_run(cfg.wandb, params, wandb_id, run_wandb=cfg.general.run_wandb)
             resume_model = "restore_checkpoint.zip"
-            assert os.path.exists(
-                resume_model
-            ), "restore_checkpoint.zip does not exist!"
+            assert os.path.exists(resume_model), "restore_checkpoint.zip does not exist!"
         else:
             defaults = HydraConfig.get().runtime.choices
             params = yaml.safe_load(cfg_yaml)
@@ -73,14 +66,13 @@ def train(cfg: DictConfig):
                 cfg_train["params"]["config"]["num_actors"] = (
                     cfg_train["params"]["config"].get("player", {}).get("num_actors", 1)
                 )
-            if not cfg.general.no_time_stamp:
-                cfg.general.logdir = os.path.join(cfg.general.logdir, get_time_stamp())
 
-            cfg_train["params"]["general"] = yaml.safe_load(
-                OmegaConf.to_yaml(cfg.general)
-            )
+            cfg_train["params"]["general"] = yaml.safe_load(OmegaConf.to_yaml(cfg.general))
             print(cfg_train["params"]["general"])
-            traj_optimizer = alg_cls(cfg_train)
+            if alg_cls == SHAC2:
+                traj_optimizer = alg_cls(cfg)
+            else:
+                traj_optimizer = alg_cls(cfg_train)
 
             if not cfg.general.play:
                 traj_optimizer.train()

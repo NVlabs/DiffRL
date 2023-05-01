@@ -3,20 +3,16 @@ params:
   network:
     actor: ActorStochasticMLP # ActorDeterministicMLP
     actor_mlp:
-      units:  # ${resolve_default:(64, 64),${.....env.actor_mlp.units}}
-        - 64
-        - 64
+      units: ${env.shac.actor_mlp.units}
       activation: elu
 
     critic: CriticMLP
     critic_mlp:
-      units: # ${resolve_default:(64, 64),${.....env.critic_mlp.units}}
-        - 64
-        - 64
+      units: ${env.shac.critic_mlp.units}}
       activation: elu
 
   config:
-    name: ${..env.name}_${name}
+    name: ${env.name}_${name}
     actor_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.actor_lr}} # adam
     critic_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.critic_lr}} # adam
     lr_schedule: linear # ('constant', 'linear')
@@ -29,15 +25,15 @@ params:
     num_batch: 4
     gamma: 0.99
     betas: (0.7, 0.95) # adam
-    max_epochs: ${....env.max_epochs} # ${resolve_default:2000,${..env.max_epochs}}
+    max_epochs: ${env.shac.max_epochs}
     steps_num: 32
     grad_norm: 1.0
     truncate_grads: True
-    num_actors: ${....env.config.num_envs} # ${resolve_default:64,${..env.config.num_envs}}
+    num_actors: ${env.config.num_envs} # ${resolve_default:64,${..env.config.num_envs}}
     save_interval: 400 # ${resolve_default:400,${..env.save_interval}}
 
     player:
       determenistic: True
-      games_num: 1 # ${resolve_default:1,${.....env.player.games_num}}
-      num_actors: 1 # ${resolve_default:1,${.....env.player.num_actors}}
+      games_num: ${env.player.games_num}
+      num_actors: ${env.player.num_actors}
       print_stats: True

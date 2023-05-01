@@ -27,8 +27,8 @@ try:
 except ModuleNotFoundError:
     print("No pxr package")
 
-from utils import load_utils as lu
-from utils import torch_utils as tu
+from shac.utils import load_utils as lu
+from shac.utils import torch_utils as tu
 
 
 class HopperEnv(DFlexEnv):
@@ -41,7 +41,7 @@ class HopperEnv(DFlexEnv):
         episode_length=1000,
         no_grad=True,
         stochastic_init=False,
-        MM_caching_frequency=1,
+        MM_caching_frequency=16,
         early_termination=True,
     ):
         num_obs = 11
@@ -76,9 +76,7 @@ class HopperEnv(DFlexEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
-            self.stage = Usd.Stage.CreateNew(
-                "outputs/" + "Hopper_" + str(self.num_envs) + ".usd"
-            )
+            self.stage = Usd.Stage.CreateNew("outputs/" + "Hopper_" + str(self.num_envs) + ".usd")
 
             self.renderer = df.render.UsdRenderer(self.model, self.stage)
             self.renderer.draw_points = True
@@ -98,19 +96,17 @@ class HopperEnv(DFlexEnv):
         self.num_joint_q = 6
         self.num_joint_qd = 6
 
-        self.x_unit_tensor = tu.to_torch(
-            [1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False
-        ).repeat((self.num_envs, 1))
-        self.y_unit_tensor = tu.to_torch(
-            [0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False
-        ).repeat((self.num_envs, 1))
-        self.z_unit_tensor = tu.to_torch(
-            [0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False
-        ).repeat((self.num_envs, 1))
-
-        self.start_rotation = torch.tensor(
-            [0.0], device=self.device, requires_grad=False
+        self.x_unit_tensor = tu.to_torch([1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
+            (self.num_envs, 1)
         )
+        self.y_unit_tensor = tu.to_torch([0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
+            (self.num_envs, 1)
+        )
+        self.z_unit_tensor = tu.to_torch([0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False).repeat(
+            (self.num_envs, 1)
+        )
+
+        self.start_rotation = torch.tensor([0.0], device=self.device, requires_grad=False)
 
         # initialize some data used later on
         # todo - switch to z-up
@@ -152,12 +148,8 @@ class HopperEnv(DFlexEnv):
             self.start_pos.append([0.0, start_height])
 
             # set joint targets to rest pose in mjcf
-            self.builder.joint_q[
-                i * self.num_joint_q + 3 : i * self.num_joint_q + 6
-            ] = [0.0, 0.0, 0.0]
-            self.builder.joint_target[
-                i * self.num_joint_q + 3 : i * self.num_joint_q + 6
-            ] = [0.0, 0.0, 0.0, 0.0]
+            self.builder.joint_q[i * self.num_joint_q + 3 : i * self.num_joint_q + 6] = [0.0, 0.0, 0.0]
+            self.builder.joint_target[i * self.num_joint_q + 3 : i * self.num_joint_q + 6] = [0.0, 0.0, 0.0, 0.0]
 
         self.start_pos = tu.to_torch(self.start_pos, device=self.device)
         self.start_joint_q = tu.to_torch(self.start_joint_q, device=self.device)
@@ -200,17 +192,18 @@ class HopperEnv(DFlexEnv):
 
         self.actions = actions.clone()
 
-        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = (
-            actions * self.action_strength
-        )
+        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = actions * self.action_strength
 
-        self.state = self.integrator.forward(
+        next_state = self.integrator.forward(
             self.model,
             self.state,
             self.sim_dt,
             self.sim_substeps,
             self.MM_caching_frequency,
         )
+        contacts_changed = next_state.body_f_s.clone().any(dim=1) != self.state.body_f_s.clone().any(dim=1)
+        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
+        self.state = next_state
         self.sim_time += self.sim_dt
 
         self.reset_buf = torch.zeros_like(self.reset_buf)
@@ -229,6 +222,8 @@ class HopperEnv(DFlexEnv):
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
             }
+
+        self.extras["contacts_changed"] = contacts_changed
 
         if len(env_ids) > 0:
             self.reset(env_ids)
@@ -250,27 +245,16 @@ class HopperEnv(DFlexEnv):
             self.state.joint_qd = self.state.joint_qd.clone()
 
             # fixed start state
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = self.start_pos[
-                env_ids, :
-            ].clone()
-            self.state.joint_q.view(self.num_envs, -1)[
-                env_ids, 2
-            ] = self.start_rotation.clone()
-            self.state.joint_q.view(self.num_envs, -1)[
-                env_ids, 3:
-            ] = self.start_joint_q.clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = self.start_pos[env_ids, :].clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 2] = self.start_rotation.clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:] = self.start_joint_q.clone()
             self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.0
-            # setting to mid-jump state
-            self.state.joint_qd.view(self.num_envs, -1)[env_ids, 0] = 5.0  # x vel
-            self.state.joint_qd.view(self.num_envs, -1)[env_ids, 1] = 1.0  # z vel
 
             # randomization
             if self.stochastic_init:
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = (
                     self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2]
-                    + 0.05
-                    * (torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5)
-                    * 2.0
+                    + 0.05 * (torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5) * 2.0
                 )
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 2] = (
                     torch.rand(len(env_ids), device=self.device) - 0.5
@@ -288,14 +272,7 @@ class HopperEnv(DFlexEnv):
                     * 2.0
                 )
                 self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = (
-                    0.05
-                    * (
-                        torch.rand(
-                            size=(len(env_ids), self.num_joint_qd), device=self.device
-                        )
-                        - 0.5
-                    )
-                    * 2.0
+                    0.05 * (torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5) * 2.0
                 )
 
             # clear action
@@ -365,24 +342,15 @@ class HopperEnv(DFlexEnv):
             self.termination_height + self.termination_height_tolerance
         )
         height_reward = torch.clip(height_diff, -1.0, 0.3)
-        height_reward = torch.where(
-            height_reward < 0.0, -200.0 * height_reward * height_reward, height_reward
-        )
-        height_reward = torch.where(
-            height_reward > 0.0, self.height_rew_scale * height_reward, height_reward
-        )
+        height_reward = torch.where(height_reward < 0.0, -200.0 * height_reward * height_reward, height_reward)
+        height_reward = torch.where(height_reward > 0.0, self.height_rew_scale * height_reward, height_reward)
 
-        angle_reward = 1.0 * (
-            -self.obs_buf[:, 1] ** 2 / (self.termination_angle**2) + 1.0
-        )
+        angle_reward = 1.0 * (-self.obs_buf[:, 1] ** 2 / (self.termination_angle**2) + 1.0)
 
         progress_reward = self.obs_buf[:, 5]
 
         self.rew_buf = (
-            progress_reward
-            + height_reward
-            + angle_reward
-            + torch.sum(self.actions**2, dim=-1) * self.action_penalty
+            progress_reward + height_reward + angle_reward + torch.sum(self.actions**2, dim=-1) * self.action_penalty
         )
 
         # reset agents
