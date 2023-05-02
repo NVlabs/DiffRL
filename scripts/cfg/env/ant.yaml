@@ -9,6 +9,7 @@ config:
   no_grad: ${general.play}
   episode_length: 1000
   MM_caching_frequency: 16
+  early_termination: True
 
 actor_mlp:
   units: [128, 64, 64]
