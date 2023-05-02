@@ -19,6 +19,10 @@ from shac import envs
 from shac.utils.common import seeding
 
 
+EPS = 0.1
+ATOL = 1e-4
+
+
 def jacobian(f, input):
     """Computes the jacobian of function f with respect to the input"""
     num_envs, input_dim = input.shape
@@ -39,7 +43,7 @@ def jacobian(f, input):
     return jacobians
 
 
-def test_jac(args):
+def example_jac(args):
     seeding()
 
     # Create environment
@@ -48,7 +52,7 @@ def test_jac(args):
     env_fn_kwargs = dict(
         num_envs=args.num_envs,
         device="cuda",
-        render=args.render,
+        render=False,
         seed=0,
         no_grad=False,
         stochastic_init=False,  # True
@@ -110,15 +114,78 @@ def test_jac(args):
     #     print(b, torch.norm(jac[b]))
 
 
+def test_jac(args):
+    seeding()
+
+    # Create environment
+    env_fn = getattr(envs, args.env)
+
+    env_fn_kwargs = dict(
+        num_envs=1,
+        device="cuda",
+        render=False,
+        seed=0,
+        no_grad=False,
+        stochastic_init=False,  # True
+    )
+
+    env = env_fn(**env_fn_kwargs)
+    env.reset()
+
+    def f(inputs):
+        """Wrapper function for a single simulation step function"""
+        # first set state
+        states = inputs[:, : env.num_obs]
+        env.state.joint_q.view(env.num_envs, -1)[:, 0] = 0.0
+        env.state.joint_q.view(env.num_envs, -1)[:, 1:] = states[:, :5]
+        env.state.joint_qd.view(env.num_envs, -1)[:] = states[:, 5:]
+
+        # compute and set action
+        actions = inputs[:, env.num_obs :]
+        actions = torch.clip(actions, -1.0, 1.0)
+        unscaled_actions = actions * env.action_strength
+        env.state.joint_act.view(env.num_envs, -1)[:, 3:] = unscaled_actions
+
+        next_state = env.integrator.forward(
+            env.model,
+            env.state,
+            env.sim_dt,
+            env.sim_substeps,
+            env.MM_caching_frequency,
+            False,
+        )
+        next_state = torch.cat(
+            [
+                next_state.joint_q.view(env.num_envs, -1)[:, 1:],
+                next_state.joint_qd.view(env.num_envs, -1),
+            ],
+            dim=-1,
+        )
+        return next_state.flatten()
+
+    print("obs space:", env.num_obs)
+    print("act space:", env.num_acts)
+    states = tu.to_torch(np.random.randn(env.num_envs, env.num_obs))
+    actions = tu.to_torch(np.random.uniform(-1, 1, (env.num_envs, env.num_acts)))
+    inputs = torch.cat((states, actions), dim=1)
+    inputs.requires_grad_(True)
+
+    assert torch.autograd.gradcheck(f, (inputs,), eps=EPS, atol=ATOL)
+
+
 def main(args):
-    test_jac(args)
+    example_jac(args)
+
+    if args.test:
+        args.num_envs = 1
+        test_jac(args)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="CartPoleSwingUpEnv")
     parser.add_argument("--num-envs", type=int, default=1)
-    parser.add_argument("--render", default=False, action="store_true")
+    parser.add_argument("--test", default=False, action="store_true")
 
     args = parser.parse_args()
     main(args)
