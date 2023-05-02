@@ -33,7 +33,7 @@ def jacobian(f, input):
         e = torch.tile(select_index, (num_envs, 1)).cuda()
         output.backward(e, retain_graph=True)
         vector_jacobian = input.grad
-        jacobians[:, out_idx, :] = vector_jacobian.view(N, input_dim)
+        jacobians[:, out_idx, :] = vector_jacobian.view(num_envs, input_dim)
         input.grad.zero_()
 
     return jacobians
@@ -77,6 +77,7 @@ def test_jac(args):
             env.sim_dt,
             env.sim_substeps,
             env.MM_caching_frequency,
+            False,
         )
         next_state = torch.cat(
             [
