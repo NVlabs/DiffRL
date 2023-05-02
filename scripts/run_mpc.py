@@ -8,6 +8,7 @@ import warp as wp
 from tqdm import trange
 from shac.algorithms.mpc import Policy, Planner
 import matplotlib.pyplot as plt
+import numpy as np
 
 from shac.utils import hydra_utils
 from hydra.utils import instantiate
@@ -27,6 +28,7 @@ def main(cfg: DictConfig):
 
     plt.plot(rewards)
     plt.savefig("rewards.png")
+    np.save("rewards.npy", np.asarray(rewards))
 
 
 def run_planner(planner, eval_env):
