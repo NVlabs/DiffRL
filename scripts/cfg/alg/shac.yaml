@@ -8,11 +8,11 @@ params:
 
     critic: CriticMLP
     critic_mlp:
-      units: ${env.shac.critic_mlp.units}}
+      units: ${env.shac.critic_mlp.units}
       activation: elu
 
   config:
-    name: ${env.name}_${name}
+    name: ${env.name}_shac
     actor_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.actor_lr}} # adam
     critic_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.critic_lr}} # adam
     lr_schedule: linear # ('constant', 'linear')
@@ -24,7 +24,9 @@ params:
     lambda: 0.95
     num_batch: 4
     gamma: 0.99
-    betas: (0.7, 0.95) # adam
+    betas: 
+      - 0.7
+      - 0.95 # adam
     max_epochs: ${env.shac.max_epochs}
     steps_num: 32
     grad_norm: 1.0

@@ -5,7 +5,6 @@ defaults:
 
 exp_name: shac_benchmarks
 
-id: ${hydra.job.id}
 resume_model: null
 
 general:
@@ -15,12 +14,13 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: True
-  seed: 0
+  run_wandb: False
+  seed: 42
   train: True
   checkpoint:
   multi_gpu: False
   mixed_precision: False
+  num_envs: 
 
 
 # env-specific defaults for different algs
@@ -55,4 +55,4 @@ env:
 wandb:
   project: shac
   group: ${exp_name}
-  sweep_name_prefix: ${alg.params.config.name}-run
+  sweep_name_prefix: ${env.name}_${alg.name}-run

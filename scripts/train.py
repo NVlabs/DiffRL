@@ -2,7 +2,7 @@ import traceback
 import hydra, os, wandb, yaml
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
-from shac.utils import custom_resolvers
+from shac.utils import hydra_utils
 from shac.algorithms.shac import SHAC
 from shac.algorithms.shac2 import SHAC as SHAC2
 from shac.utils.common import *
@@ -38,7 +38,8 @@ cfg_path = os.path.join(cfg_path, "cfg")
 @hydra.main(config_path="cfg", config_name="config.yaml")
 def train(cfg: DictConfig):
     try:
-        cfg_yaml = OmegaConf.to_yaml(cfg.alg)
+        cfg_full = OmegaConf.to_container(cfg, resolve=True)
+        cfg_yaml = yaml.dump(cfg_full["alg"])
 
         resume_model = cfg.resume_model
         if os.path.exists("exp_config.yaml"):
@@ -49,6 +50,7 @@ def train(cfg: DictConfig):
             assert os.path.exists(resume_model), "restore_checkpoint.zip does not exist!"
         else:
             defaults = HydraConfig.get().runtime.choices
+
             params = yaml.safe_load(cfg_yaml)
             params["defaults"] = {k: defaults[k] for k in ["alg"]}
 
@@ -59,27 +61,28 @@ def train(cfg: DictConfig):
             print("Config:")
             print(cfg_yaml)
 
-        if cfg.alg.name.startswith("shac"):
-            alg_cls = SHAC if cfg.alg.name == "shac" else SHAC2
-            cfg_train = yaml.safe_load(cfg_yaml)
+        if cfg.alg.name == "shac":
+            cfg_train = cfg_full["alg"]
             if cfg.general.play:
                 cfg_train["params"]["config"]["num_actors"] = (
                     cfg_train["params"]["config"].get("player", {}).get("num_actors", 1)
                 )
+            if not cfg.general.no_time_stamp:
+                cfg.general.logdir = os.path.join(cfg.general.logdir, get_time_stamp())
 
-            cfg_train["params"]["general"] = yaml.safe_load(OmegaConf.to_yaml(cfg.general))
+            cfg_train["params"]["general"] = cfg_full["general"]
+            cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+            env_name = cfg_train["params"]["diff_env"].pop("_target_")
+            cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
             print(cfg_train["params"]["general"])
-            if alg_cls == SHAC2:
-                traj_optimizer = alg_cls(cfg)
-            else:
-                traj_optimizer = alg_cls(cfg_train)
+            traj_optimizer = SHAC(cfg_train)
+        elif cfg.alg.name == "shac2":
+            traj_optimizer = SHAC2(cfg)
 
-            if not cfg.general.play:
-                traj_optimizer.train()
-            else:
-                traj_optimizer.play(cfg_train)
+        if not cfg.general.play:
+            traj_optimizer.train()
         else:
-            raise NotImplementedError
+            traj_optimizer.play(cfg_train)
         wandb.finish()
     except:
         traceback.print_exc(file=open("exception.log", "w"))

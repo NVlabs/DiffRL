@@ -8,7 +8,9 @@ params:
   network:
     actor: ActorStochasticMLP #ActorDeterministicMLP
     actor_mlp:
-      units: [64, 64]
+      units:
+        - 64
+        - 64
       activation: elu
 
     critic: CriticMLP

@@ -1,120 +1,131 @@
-# Copyright (c) 2022 NVIDIA CORPORATION.  All rights reserved.
+# Added option to resume training and loa Copyright (c) 2022 NVIDIA CORPORATION.  All rights reserved.
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import sys, os
+import copy
+import math
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
+import os
+import sys
+import time
 
+import yaml
+
+from rl_games.common import schedulers
+from rl_games.algos_torch import torch_ext
+from shac.utils.average_meter import AverageMeter
+from shac.utils.common import *
+from shac.utils.dataset import CriticDataset
+from shac.utils.running_mean_std import RunningMeanStd
+from shac.utils.time_report import TimeReport
+import shac.utils.torch_utils as tu
+from tensorboardX import SummaryWriter
+import torch.distributed as dist
 from torch.nn.utils.clip_grad import clip_grad_norm_
 
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
 
-import time
-import copy
-from tensorboardX import SummaryWriter
-import yaml
-
-from shac import envs
-import shac.models.actor as actor_models
-import shac.models.critic as critic_models
-from shac.utils.common import *
-import shac.utils.torch_utils as tu
-from shac.utils.running_mean_std import RunningMeanStd
-from shac.utils.dataset import CriticDataset, QCriticDataset
-from shac.utils.time_report import TimeReport
-from shac.utils.average_meter import AverageMeter
-
 
 class SHAC:
-    def __init__(self, cfg):
-        env_name = cfg["params"]["diff_env"].pop("name")
-        env_fn = getattr(envs, env_name)
-
-        if "stochastic_init" in cfg["params"]["diff_env"]:
-            stochastic_init = cfg["params"]["diff_env"].pop("stochastic_init")
+    def __init__(self, cfg: dict):
+        seeding(cfg["general"]["seed"])
+        if "diff_env" not in cfg.env.config:
+            self.env = instantiate(cfg.env.config)
         else:
-            stochastic_init = True
-
-        config = dict(
-            num_envs=cfg["params"]["config"]["num_actors"],
-            device=cfg["params"]["general"]["device"],
-            render=cfg["params"]["general"]["render"],
-            seed=cfg["params"]["general"]["seed"],
-            episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
-            stochastic_init=stochastic_init,
-            no_grad=False,
-        )
-
-        config.update(cfg["params"].get("diff_env", {}))
-        seeding(config["seed"])
-
-        self.env = env_fn(**config)
-        # reset diff_env config for yaml
-        cfg["params"]["diff_env"] = config
-        cfg["params"]["diff_env"]["name"] = env_name
+            self.env = instantiate(cfg.env.config.diff_env)
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
         print("num_obs = ", self.env.num_obs)
 
+        self.multi_gpu = cfg["alg"]["params"]["config"].get("multi_gpu", False)
+        self.rank = 0
+        self.rank_size = 1
+
+        if self.multi_gpu:
+            self.rank = int(os.getenv("LOCAL_RANK", "0"))
+            self.rank_size = int(os.getenv("WORLD_SIZE", "1"))
+            dist.init_process_group("nccl", rank=self.rank, world_size=self.rank_size)
+
+            self.device_name = "cuda:" + str(self.rank)
+            cfg["general"]["device"] = self.device_name
+            if self.rank != 0:
+                cfg["alg"]["params"]["config"]["print_stats"] = False
+                # cfg["params"]["config"]["lr_schedule"] = None
+
         self.num_envs = self.env.num_envs
         self.num_obs = self.env.num_obs
         self.num_actions = self.env.num_actions
         self.max_episode_length = self.env.episode_length
-        self.device = cfg["params"]["general"]["device"]
+        self.device = cfg["general"]["device"]
 
-        self.gamma = cfg["params"]["config"].get("gamma", 0.99)
+        self.gamma = cfg["alg"]["params"]["config"].get("gamma", 0.99)
 
-        self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")  # ['one-step', 'td-lambda']
+        self.critic_method = cfg["alg"]["params"]["config"].get(
+            "critic_method", "one-step"
+        )  # ['one-step', 'td-lambda']
         if self.critic_method == "td-lambda":
-            self.lam = cfg["params"]["config"].get("lambda", 0.95)
+            self.lam = cfg["alg"]["params"]["config"].get("lambda", 0.95)
 
-        self.steps_num = cfg["params"]["config"]["steps_num"]
-        self.max_epochs = cfg["params"]["config"]["max_epochs"]
-        self.actor_lr = float(cfg["params"]["config"]["actor_learning_rate"])
-        self.critic_lr = float(cfg["params"]["config"]["critic_learning_rate"])
-        self.lr_schedule = cfg["params"]["config"].get("lr_schedule", "linear")
+        self.steps_num = cfg["alg"]["params"]["config"]["steps_num"]
+        self.max_epochs = cfg["alg"]["params"]["config"]["max_epochs"]
+        self.actor_lr = float(cfg["alg"]["params"]["default_actor_opt"]["lr"])
+        self.critic_lr = float(cfg["alg"]["params"]["default_critic_opt"]["lr"])
+        self.lr_schedule = cfg["alg"]["params"]["config"].get("lr_schedule", "linear")
 
-        self.target_critic_alpha = cfg["params"]["config"].get("target_critic_alpha", 0.4)
+        self.is_adaptive_lr = self.lr_schedule == "adaptive"
+        self.is_linear_lr = self.lr_schedule == "linear"
 
-        self.obs_rms = None
-        if cfg["params"]["config"].get("obs_rms", False):
-            self.obs_rms = RunningMeanStd(shape=(self.num_obs), device=self.device)
+        if self.is_adaptive_lr:
+            self.scheduler = instantiate(cfg["alg"]["params"]["default_adaptive_scheduler"])
+        elif self.is_linear_lr:
+            self.scheduler = instantiate(cfg["alg"]["params"]["default_linear_scheduler"])
+        else:
+            self.scheduler = schedulers.IdentityScheduler()
+
+        self.target_critic_alpha = cfg["alg"]["params"]["config"].get("target_critic_alpha", 0.4)
+
+        self._obs_rms = None
+        self.curr_epoch = 0
+        self.sub_traj_per_epoch = math.ceil(self.max_episode_length / self.steps_num)
+        # number of epochs of no improvement for early stopping
+        self.early_stopping_patience = cfg["alg"]["params"]["config"].get("early_stopping_patience", self.max_epochs)
+        if cfg["alg"]["params"]["config"].get("obs_rms", False):
+            # generate obs_rms for each subtrajectory
+            self._obs_rms = [
+                RunningMeanStd(shape=(self.num_obs), device=self.device)
+                # for _ in range(self.sub_traj_per_epoch)
+            ]
 
         self.ret_rms = None
-        if cfg["params"]["config"].get("ret_rms", False):
+        if cfg["alg"]["params"]["config"].get("ret_rms", False):
             self.ret_rms = RunningMeanStd(shape=(), device=self.device)
 
-        self.rew_scale = cfg["params"]["config"].get("rew_scale", 1.0)
+        self.rew_scale = cfg["alg"]["params"]["config"].get("rew_scale", 1.0)
 
-        self.critic_iterations = cfg["params"]["config"].get("critic_iterations", 16)
-        self.num_batch = cfg["params"]["config"].get("num_batch", 4)
+        self.critic_iterations = cfg["alg"]["params"]["config"].get("critic_iterations", 16)
+        self.num_batch = cfg["alg"]["params"]["config"].get("num_batch", 4)
         self.batch_size = self.num_envs * self.steps_num // self.num_batch
-        self.name = cfg["params"]["config"].get("name", "Ant")
+        self.name = cfg["alg"]["params"]["config"]
 
-        self.truncate_grad = cfg["params"]["config"]["truncate_grads"]
-        self.grad_norm = cfg["params"]["config"]["grad_norm"]
+        self.truncate_grad = cfg["alg"]["params"]["config"]["truncate_grads"]
+        self.grad_norm = cfg["alg"]["params"]["config"]["grad_norm"]
 
-        if cfg["params"]["general"]["train"]:
-            self.log_dir = cfg["params"]["general"]["logdir"]
-            os.makedirs(self.log_dir, exist_ok=True)
-            # save config
-            save_cfg = copy.deepcopy(cfg)
-            if "general" in save_cfg["params"]:
-                deleted_keys = []
-                for key in save_cfg["params"]["general"].keys():
-                    if key in save_cfg["params"]["config"]:
-                        deleted_keys.append(key)
-                for key in deleted_keys:
-                    del save_cfg["params"]["general"][key]
-
-            yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
-            self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
+        if cfg["general"]["train"]:
+            self.log_dir = cfg["general"]["logdir"]
+            if not self.multi_gpu or self.rank == 0:
+                os.makedirs(self.log_dir, exist_ok=True)
+                # save config
+                save_cfg = OmegaConf.to_yaml(cfg)
+                yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
+                self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
             # save interval
-            self.save_interval = cfg["params"]["config"].get("save_interval", 500)
+            self.save_interval = cfg["alg"]["params"]["config"].get("save_interval", 500)
             # stochastic inference
             self.stochastic_evaluation = True
         else:
@@ -125,34 +136,34 @@ class SHAC:
             self.steps_num = self.env.episode_length
 
         # create actor critic network
-        self.actor_name = cfg["params"]["network"].get(
-            "actor", "ActorStochasticMLP"
-        )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
-        self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
-        actor_fn = getattr(actor_models, self.actor_name)
-        self.actor = actor_fn(self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device)
-        critic_fn = getattr(critic_models, self.critic_name)
-        if self.critic_name == "CriticMLP":
-            self.critic = critic_fn(self.num_obs, cfg["params"]["network"], device=self.device)
-        else:
-            self.critic = critic_fn(self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device)
+        self.actor = instantiate(
+            cfg["alg"]["params"]["network"]["actor"],
+            num_obs=self.num_obs,
+            num_actions=self.num_actions,
+            device=self.device,
+        )
+        self.critic = instantiate(
+            cfg["alg"]["params"]["network"]["critic"],
+            num_obs=self.num_obs,
+            num_actions=self.num_actions,
+            device=self.device,
+        )
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
-        if cfg["params"]["general"]["train"]:
+        # initialize optimizer
+        self.actor_optimizer = instantiate(
+            cfg["alg"]["params"]["config"]["actor_optimizer"], params=self.actor.parameters()
+        )
+        self.critic_optimizer = instantiate(
+            cfg["alg"]["params"]["config"]["critic_optimizer"], params=self.critic.parameters()
+        )
+
+        if cfg["general"]["train"]:
             self.save("init_policy")
 
-        # initialize optimizer
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.actor_lr,
-        )
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.critic_lr,
-        )
+        self.mixed_precision = cfg["alg"]["params"]["config"].get("mixed_precision", False)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
 
         # replay buffer
         self.obs_buf = torch.zeros(
@@ -160,12 +171,6 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
-        if self.critic_name == "QCriticMLP":
-            self.act_buf = torch.zeros(
-                (self.steps_num, self.num_envs, self.num_actions),
-                dtype=torch.float32,
-                device=self.device,
-            )
         self.rew_buf = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
         self.done_mask = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
         self.next_values = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
@@ -207,6 +212,7 @@ class SHAC:
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
+        self.best_policy_epoch = 0
         self.actor_loss = np.inf
         self.value_loss = np.inf
 
@@ -214,7 +220,7 @@ class SHAC:
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_discounted_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
-        self.score_keys = cfg["params"]["config"].get("score_keys", [])
+        self.score_keys = cfg["alg"]["params"]["config"].get("score_keys", [])
         self.episode_scores_meter_map = {
             key + "_final": AverageMeter(1, 100).to(self.device) for key in self.score_keys
         }
@@ -222,12 +228,22 @@ class SHAC:
         # timer
         self.time_report = TimeReport()
 
+    @property
+    def obs_rms(self):
+        if self._obs_rms is None:
+            return self._obs_rms
+        return self._obs_rms[0]  # self.curr_epoch % self.sub_traj_per_epoch]
+
     def compute_actor_loss(self, deterministic=False):
         rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
+        next_values_model_free = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -250,10 +266,7 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             actions = self.actor(obs, deterministic=deterministic)
-
-            if self.critic_name == "QCriticMLP":
-                with torch.no_grad():
-                    self.act_buf[i] = actions.clone()
+            self.mus[i, :], _, self.sigmas[i, :] = self.actor.forward_with_dist(obs, deterministic=False)
 
             obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
 
@@ -280,13 +293,13 @@ class SHAC:
 
             self.episode_length += 1
 
-            done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            if self.critic_name == "CriticMLP":
-                next_values[i + 1] = self.target_critic(obs).squeeze(-1)
-            else:
-                next_values[i + 1] = self.target_critic(obs, torch.tanh(actions)).squeeze(-1)
+            next_values[i + 1] = torch.minimum(self.critic(obs).squeeze(-1), self.target_critic(obs).squeeze(-1))
+            next_values_model_free[i + 1] = torch.minimum(
+                self.critic(obs.requires_grad_(False)).squeeze(-1),
+                self.target_critic(obs.require_grad_(False)).squeeze(-1),
+            )
 
             for id in done_env_ids:
                 if (
@@ -302,15 +315,15 @@ class SHAC:
                         real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
                     else:
                         real_obs = extra_info["obs_before_reset"][id]
-
-                    if self.critic_name == "CriticMLP":
-                        next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
-                    else:
-                        real_act = torch.tanh(actions[id])
-                        next_values[i + 1, id] = self.target_critic(real_obs, real_act).squeeze(-1)
+                    next_values[i + 1, id] = torch.minimum(
+                        self.critic(real_obs).squeeze(-1),
+                        self.target_critic(real_obs).squeeze(-1),
+                    )
 
             if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
                 print("next value error")
+                if self.multi_gpu:
+                    dist.destroy_process_group()
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
@@ -319,9 +332,16 @@ class SHAC:
                 actor_loss += (
                     -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
                 ).sum()
+                actor_model_free_loss += (
+                    -rew_acc[i + 1, done_env_ids].detach()
+                    - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
+                ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
                 actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
+                actor_model_free_loss += (
+                    -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
+                ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
@@ -353,6 +373,8 @@ class SHAC:
                     for done_env_id in done_env_ids:
                         if self.episode_loss[done_env_id] > 1e6 or self.episode_loss[done_env_id] < -1e6:
                             print("ep loss error")
+                            if self.multi_gpu:
+                                dist.destroy_process_group()
                             raise ValueError
 
                         self.episode_loss_his.append(self.episode_loss[done_env_id].item())
@@ -364,15 +386,18 @@ class SHAC:
                         self.episode_gamma[done_env_id] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
+        actor_model_free_loss /= self.steps_num * self.num_envs
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
+            actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().cpu().item()
+        self.actor_model_free_loss = actor_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
 
-        return actor_loss
+        return actor_loss, actor_model_free_loss
 
     @torch.no_grad()
     def evaluate_policy(self, num_games, deterministic=False):
@@ -449,10 +474,7 @@ class SHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        if self.critic_name == "CriticMLP":
-            predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
-        else:
-            predicted_values = self.critic(batch_sample["obs"], batch_sample["act"]).squeeze(-1)
+        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -491,58 +513,114 @@ class SHAC:
 
         # initializations
         self.initialize_env()
+        if self.multi_gpu:
+            torch.cuda.set_device(self.rank)
+            if self.rank == 0:
+                print("====================broadcasting parameters")
+                print("====actor parameters")
+            actor_params = [self.actor.state_dict()]
+            dist.broadcast_object_list(actor_params, 0)
+            self.actor.load_state_dict(actor_params[0])
+            if self.rank == 0:
+                print("====critic parameters")
+            critic_params = [self.critic.state_dict()]
+            dist.broadcast_object_list(critic_params, 0)
+            self.critic.load_state_dict(critic_params[0])
+            if self.rank == 0:
+                print("done broadcasting parameters====================")
+
         self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
 
         def actor_closure():
-            self.actor_optimizer.zero_grad()
+            self.actor_optimizer.zero_grad(set_to_none=True)
 
             self.time_report.start_timer("compute actor loss")
 
             self.time_report.start_timer("forward simulation")
-            actor_loss = self.compute_actor_loss()
+            # env_state = self.env.get_checkpoint()
+            # TODO: use autoscaling for mixed precision
+
+            with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+                actor_loss, actor_model_free_loss = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
-            actor_loss.backward()
+            self.scaler.scale(actor_loss).backward()
             self.time_report.end_timer("backward simulation")
 
             with torch.no_grad():
+                self.scaler.unscale_(self.actor_optimizer)
                 self.grad_norm_before_clip = tu.grad_norm(self.actor.parameters())
-                if self.truncate_grad:
-                    clip_grad_norm_(self.actor.parameters(), self.grad_norm)
+                self.truncate_gradients_and_step(self.actor.parameters(), self.actor_optimizer, unscale=False)
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
 
                 # sanity check
                 if torch.isnan(self.grad_norm_before_clip) or self.grad_norm_before_clip > 1000000.0:
+                    print("shac training crashed due to unstable gradient")
+                    # torch.save(env_state, os.path.join(self.log_dir, "bad_state.pt"))
                     print("NaN gradient")
+                    if not self.multi_gpu or self.rank == 0:
+                        self.save("crashed")
+                    if self.multi_gpu:
+                        dist.destroy_process_group()
                     raise ValueError
 
             self.time_report.end_timer("compute actor loss")
 
             return actor_loss
 
+        actor_lr, critic_lr = self.actor_lr, self.critic_lr
+        print("starting training: lr = {}, {}".format(actor_lr, critic_lr))
+        start_epoch = self.curr_epoch
         # main training process
-        for epoch in range(self.max_epochs):
+        for epoch in range(start_epoch, self.max_epochs):
+            self.curr_epoch += 1
             time_start_epoch = time.time()
 
             # learning rate schedule
             if self.lr_schedule == "linear":
-                actor_lr = (1e-5 - self.actor_lr) * float(epoch / self.max_epochs) + self.actor_lr
+                if self.rank == 0:
+                    actor_lr, _ = self.scheduler.update(actor_lr, None, self.curr_epoch, None, None)
+                    critic_lr, _ = self.scheduler.update(critic_lr, None, self.curr_epoch, None, None)
+
+                if self.multi_gpu:
+                    lr_tensor = torch.tensor([actor_lr, critic_lr], device=self.device)
+                    dist.broadcast(lr_tensor, 0)
+                    actor_lr = lr_tensor[0].item()
+                    critic_lr = lr_tensor[1].item()
+
+                for param_group in self.critic_optimizer.param_groups:
+                    param_group["lr"] = critic_lr
+
                 for param_group in self.actor_optimizer.param_groups:
                     param_group["lr"] = actor_lr
                 lr = actor_lr
-                critic_lr = (1e-5 - self.critic_lr) * float(epoch / self.max_epochs) + self.critic_lr
-                for param_group in self.critic_optimizer.param_groups:
-                    param_group["lr"] = critic_lr
+            elif self.lr_schedule == "adaptive":
+                av_kls = torch_ext.mean_list(ep_kls)
+                if self.multi_gpu:
+                    dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
+                    av_kls /= self.rank_size
+                kl_dist = torch_ext.policy_kl(
+                    self.mus.detach(),
+                    self.sigmas.detach(),
+                    self.old_mus,
+                    self.old_sigmas,
+                    reduce=True,
+                )
+
             else:
                 lr = self.actor_lr
 
             # train actor
             self.time_report.start_timer("actor training")
-            self.actor_optimizer.step(actor_closure).detach().item()
+            actor_loss = actor_closure()
+            # self.truncate_gradients_and_step(
+            #     self.actor.parameters(), self.actor_optimizer, unscale=False
+            # )
+            # self.actor_optimizer.step(actor_closure).detach().item()
             self.time_report.end_timer("actor training")
 
             # train critic
@@ -550,12 +628,7 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                if self.critic_name == "CriticMLP":
-                    dataset = CriticDataset(self.batch_size, self.obs_buf, self.target_values, drop_last=False)
-                else:
-                    dataset = QCriticDataset(
-                        self.batch_size, self.obs_buf, self.act_buf, self.target_values, drop_last=False
-                    )
+                dataset = CriticDataset(self.batch_size, self.obs_buf, self.target_values, drop_last=False)
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")
@@ -565,18 +638,16 @@ class SHAC:
                 batch_cnt = 0
                 for i in range(len(dataset)):
                     batch_sample = dataset[i]
-                    self.critic_optimizer.zero_grad()
-                    training_critic_loss = self.compute_critic_loss(batch_sample)
-                    training_critic_loss.backward()
+                    self.critic_optimizer.zero_grad(set_to_none=True)
+                    with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+                        training_critic_loss = self.compute_critic_loss(batch_sample)
+                    self.scaler.scale(training_critic_loss).backward()
 
                     # ugly fix for simulation nan problem
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    if self.truncate_grad:
-                        clip_grad_norm_(self.critic.parameters(), self.grad_norm)
-
-                    self.critic_optimizer.step()
+                    self.truncate_gradients_and_step(self.critic.parameters(), self.critic_optimizer)
 
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
@@ -592,8 +663,19 @@ class SHAC:
             self.iter_count += 1
 
             time_end_epoch = time.time()
+            should_exit = False
 
-            # logging
+            # update target critic
+            with torch.no_grad():
+                alpha = self.target_critic_alpha
+                for param, param_targ in zip(self.critic.parameters(), self.target_critic.parameters()):
+                    param_targ.data.mul_(alpha)
+                    param_targ.data.add_((1.0 - alpha) * param.data)
+
+            # skip logging if not the head node
+            if self.rank != 0 and self.multi_gpu:
+                continue
+
             time_elapse = time.time() - self.start_time
             self.writer.add_scalar("lr/iter", lr, self.iter_count)
             self.writer.add_scalar("actor_loss/step", self.actor_loss, self.step_count)
@@ -609,6 +691,12 @@ class SHAC:
                     print_info("save best policy with loss {:.2f}".format(mean_policy_loss))
                     self.save()
                     self.best_policy_loss = mean_policy_loss
+                    self.best_policy_epoch = self.curr_epoch
+                # number of episodes with no improvement
+                else:
+                    last_improved_ep = self.best_policy_epoch - self.curr_epoch
+                    if last_improved_ep > self.early_stopping_patience:
+                        should_exit = True
 
                 self.writer.add_scalar("policy_loss/step", mean_policy_loss, self.step_count)
                 self.writer.add_scalar("policy_loss/time", mean_policy_loss, time_elapse)
@@ -637,14 +725,12 @@ class SHAC:
                 self.writer.add_scalar("episode_lengths/iter", mean_episode_length, self.iter_count)
                 self.writer.add_scalar("episode_lengths/step", mean_episode_length, self.step_count)
                 self.writer.add_scalar("episode_lengths/time", mean_episode_length, time_elapse)
-                ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
-                self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
-                self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
+
+            self.writer.flush()
 
             print(
                 "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
@@ -652,72 +738,146 @@ class SHAC:
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch),
+                    self.steps_num * self.num_envs * self.rank_size / (time_end_epoch - time_start_epoch),
                     self.value_loss,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,
                 )
             )
-
-            self.writer.flush()
-
             if self.save_interval > 0 and (self.iter_count % self.save_interval == 0):
                 self.save(self.name + "policy_iter{}_reward{:.3f}".format(self.iter_count, -mean_policy_loss))
 
-            # update target critic
-            with torch.no_grad():
-                alpha = self.target_critic_alpha
-                for param, param_targ in zip(self.critic.parameters(), self.target_critic.parameters()):
-                    param_targ.data.mul_(alpha)
-                    param_targ.data.add_((1.0 - alpha) * param.data)
+            if should_exit:
+                break
 
         self.time_report.end_timer("algorithm")
 
         self.time_report.report()
 
-        self.save("final_policy")
+        if self.rank == 0 or not self.multi_gpu:
+            self.save("final_policy")
+            # save reward/length history
+            self.episode_loss_his = np.array(self.episode_loss_his)
+            self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
+            self.episode_length_his = np.array(self.episode_length_his)
+            np.save(
+                open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
+                self.episode_loss_his,
+            )
+            np.save(
+                open(os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"),
+                self.episode_discounted_loss_his,
+            )
+            np.save(
+                open(os.path.join(self.log_dir, "episode_length_his.npy"), "wb"),
+                self.episode_length_his,
+            )
 
-        # save reward/length history
-        self.episode_loss_his = np.array(self.episode_loss_his)
-        self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
-        self.episode_length_his = np.array(self.episode_length_his)
-        np.save(
-            open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
-            self.episode_loss_his,
-        )
-        np.save(
-            open(os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"),
-            self.episode_discounted_loss_his,
-        )
-        np.save(
-            open(os.path.join(self.log_dir, "episode_length_his.npy"), "wb"),
-            self.episode_length_his,
-        )
+            # evaluate the final policy's performance
+            self.run(self.num_envs)
+            self.close()
 
-        # evaluate the final policy's performance
-        self.run(self.num_envs)
+        if self.multi_gpu and should_exit:
+            dist.destroy_process_group()
 
-        self.close()
+    def truncate_gradients_and_step(self, parameters, optimizer, unscale=True):
+        if self.multi_gpu:
+            # batch allreduce ops: see https://github.com/entity-neural-network/incubator/pull/220
+            all_grads_list = []
+            for param in parameters:
+                if param.grad is not None:
+                    all_grads_list.append(param.grad.view(-1))
+            all_grads = torch.cat(all_grads_list)
+            dist.all_reduce(all_grads, op=dist.ReduceOp.SUM)
+            offset = 0
+            for param in parameters:
+                if param.grad is not None:
+                    param.grad.data.copy_(
+                        all_grads[offset : offset + param.numel()].view_as(param.grad.data) / self.rank_size
+                    )
+                    offset += param.numel()
+
+        if self.truncate_grad:
+            if unscale:
+                self.scaler.unscale_(optimizer)
+            clip_grad_norm_(parameters, self.grad_norm)
+
+        self.scaler.step(optimizer)
+        self.scaler.update()
 
     def play(self, cfg):
-        self.load(cfg["params"]["general"]["checkpoint"])
+        self.load(cfg["params"]["general"]["checkpoint"], cfg)
         self.run(cfg["params"]["config"]["player"]["games_num"])
 
     def save(self, filename=None):
         if filename is None:
             filename = "best_policy"
         torch.save(
-            [self.actor, self.critic, self.target_critic, self.obs_rms, self.ret_rms],
+            [
+                self.actor.state_dict(),
+                self.critic.state_dict(),
+                self.target_critic.state_dict(),
+                self._obs_rms,
+                self.ret_rms,
+                self.actor_optimizer.state_dict(),
+                self.critic_optimizer.state_dict(),
+            ],
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
-    def load(self, path):
-        checkpoint = torch.load(path)
-        self.actor = checkpoint[0].to(self.device)
-        self.critic = checkpoint[1].to(self.device)
-        self.target_critic = checkpoint[2].to(self.device)
-        self.obs_rms = checkpoint[3].to(self.device)
+    def load(self, path, cfg, map_location=None):
+        checkpoint = torch.load(path, map_location=map_location)
+        if isinstance(checkpoint[0], dict):
+            self.actor.load_state_dict(checkpoint[0])
+        else:
+            self.actor = checkpoint[0].to(self.device)
+        if isinstance(checkpoint[1], dict):
+            self.critic.load_state_dict(checkpoint[1])
+        else:
+            self.critic = checkpoint[1].to(self.device)
+
+        if isinstance(checkpoint[2], dict):
+            self.target_critic.load_state_dict(checkpoint[2])
+        else:
+            self.target_critic = checkpoint[2].to(self.device)
+
+        if checkpoint[3]:
+            self._obs_rms = checkpoint[3]
+            self._obs_rms = [x.to(self.device) for x in self._obs_rms]
+
         self.ret_rms = checkpoint[4].to(self.device) if checkpoint[4] is not None else checkpoint[4]
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(),
+            betas=cfg["params"]["config"]["betas"],
+            lr=self.actor_lr,
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(),
+            betas=cfg["params"]["config"]["betas"],
+            lr=self.critic_lr,
+        )
+
+        if len(checkpoint) == 7:  # backwards compatible with older checkpoints
+            self.actor_optimizer.load_state_dict(checkpoint[5])
+            self.critic_optimizer.load_state_dict(checkpoint[6])
+
+    def resume_from(self, path, cfg, epoch, step_count=None, loss=None):
+        self.curr_epoch = epoch
+        if loss:
+            self.best_policy_loss = loss
+        if step_count:
+            self.step_count = step_count
+        if self.multi_gpu:
+            ep_tensor = torch.tensor(
+                [self.curr_epoch, self.step_count, self.best_policy_loss],
+                device=self.device,
+            )
+            dist.broadcast(ep_tensor, 0)
+            if self.rank != 0:
+                self.curr_epoch = int(ep_tensor[0].item())
+                self.step_count = int(ep_tensor[1].item())
+                self.best_policy_loss = ep_tensor[2].item()
+        self.load(path, cfg)
 
     def close(self):
         self.writer.close()

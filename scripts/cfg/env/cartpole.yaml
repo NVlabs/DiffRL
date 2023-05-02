@@ -23,7 +23,9 @@ shac:
     - 0.7
     - 0.95
   actor_mlp:
-    units: [64, 64]
+    units:
+      - 64
+      - 64
   target_critic_alpha: 0.2 
 
 shac2: 
