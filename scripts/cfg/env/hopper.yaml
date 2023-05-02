@@ -7,18 +7,22 @@ config:
   num_envs: ${resolve_default:512,${general.num_envs}}
   seed: ${general.seed}
   episode_length: 1000
-  no_grad: False
+  no_grad: ${general.play}
   stochastic_init: False
   MM_caching_frequency: 4
-  early_termination: False
+  early_termination: True
     
 shac:
   actor_lr: 1e-3
   critic_lr: 1e-2
   max_epochs: 500
-  betas: (0.7, 0.95)
+  betas:
+    - 0.7
+    - 0.95
   actor_mlp:
-    units: [128, 128]
+    units: 
+      - 128
+      - 128 
 
 ppo:
   max_epochs: 500 
