@@ -2299,8 +2299,6 @@ class SimulateFunc(torch.autograd.Function):
         tensors: TODO?
         """
 
-        # print("calling forward!")
-
         # record launches
         ctx.tape = df.Tape()
 
