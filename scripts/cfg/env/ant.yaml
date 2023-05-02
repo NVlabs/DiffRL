@@ -3,16 +3,14 @@ config:
   _target_: shac.envs.AntEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 64
+  num_envs: ${resolve_default:64,${general.num_envs}}
   stochastic_init: True
   seed: ${general.seed}
   no_grad: ${general.play}
   episode_length: 1000
   MM_caching_frequency: 16
+  steps_num: True
   early_termination: True
-
-actor_mlp:
-  units: [128, 64, 64]
 
 shac:
   actor_lr: 2e-3
@@ -20,3 +18,10 @@ shac:
   max_epochs: 2000
   num_actors: 64
   target_critic_alpha: 0.2
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+  player:
+    games_num: 1
+    num_actors: 1
