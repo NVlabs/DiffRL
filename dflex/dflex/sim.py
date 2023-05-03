@@ -2305,6 +2305,7 @@ class SimulateFunc(torch.autograd.Function):
         # ctx.inputs is the input to the model but what are they?
         ctx.inputs = tensors
         ctx.reset_tape = reset_tape
+        ctx.num_backward = 0  # TODO very much a hack
 
         actuation = state_in.joint_act
 
@@ -2336,6 +2337,7 @@ class SimulateFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grad_output):
+        ctx.num_backward += 1
         # NOTE: debugging code below
         # print("calling backwards!")
         # tot_norm = 0
@@ -2382,7 +2384,7 @@ class SimulateFunc(torch.autograd.Function):
 
         # Free the tape if we don't think it would be useful again;
         #   otherwise just zero it so that we don't accumulate gradients
-        if ctx.reset_tape:
+        if ctx.reset_tape or ctx.num_backward == 11:  # this should be output dim!
             ctx.tape.reset()
         else:
             ctx.tape.zero()
