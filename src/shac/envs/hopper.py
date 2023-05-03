@@ -30,6 +30,8 @@ except ModuleNotFoundError:
 from shac.utils import load_utils as lu
 from shac.utils import torch_utils as tu
 
+# from shac.utils.integrator import ContactIntegrator
+
 
 class HopperEnv(DFlexEnv):
     def __init__(
@@ -161,6 +163,7 @@ class HopperEnv(DFlexEnv):
         self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float32, device=self.device)
 
         self.integrator = df.sim.SemiImplicitIntegrator()
+        # self.integrator = ContactIntegrator()
 
         self.state = self.model.state()
 
@@ -197,7 +200,7 @@ class HopperEnv(DFlexEnv):
             self.sim_substeps,
             self.MM_caching_frequency,
         )
-        contacts_changed = next_state.body_f_s.clone().any(dim=1) != self.state.body_f_s.clone().any(dim=1)
+        contacts_changed = next_state.contact_changed.clone() != self.state.contact_changed.clone()
         contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
