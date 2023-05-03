@@ -14,17 +14,20 @@ import cProfile
 
 log_output = ""
 
+
 def log(s):
     print(s)
     global log_output
     log_output = log_output + s + "\n"
+
 
 # short hands
 
 
 # torch quat/vector utils
 
-def to_torch(x, dtype=torch.float, device='cuda:0', requires_grad=False):
+
+def to_torch(x, dtype=torch.float, device="cuda:0", requires_grad=False):
     return torch.tensor(x, dtype=dtype, device=device, requires_grad=requires_grad)
 
 
@@ -72,11 +75,13 @@ def quat_rotate(q, v):
     shape = q.shape
     q_w = q[:, -1]
     q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * \
-        torch.bmm(q_vec.view(shape[0], 1, 3), v.view(
-            shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a + b + c
 
 
@@ -85,11 +90,13 @@ def quat_rotate_inverse(q, v):
     shape = q.shape
     q_w = q[:, -1]
     q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * \
-        torch.bmm(q_vec.view(shape[0], 1, 3), v.view(
-            shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a - b + c
 
 
@@ -153,17 +160,17 @@ def get_basis_vector(q, v):
 
 
 def mem_report():
-    '''Report the memory usage of the tensor.storage in pytorch
-    Both on CPUs and GPUs are reported'''
+    """Report the memory usage of the tensor.storage in pytorch
+    Both on CPUs and GPUs are reported"""
 
     def _mem_report(tensors, mem_type):
-        '''Print the selected tensors of type
+        """Print the selected tensors of type
         There are two major storage types in our major concern:
             - GPU: tensors transferred to CUDA devices
             - CPU: tensors remaining on the system memory (usually unimportant)
         Args:
             - tensors: the tensors of specified type
-            - mem_type: 'CPU' or 'GPU' in current implementation '''
+            - mem_type: 'CPU' or 'GPU' in current implementation"""
         total_numel = 0
         total_mem = 0
         visited_data = []
@@ -179,7 +186,7 @@ def mem_report():
             numel = tensor.storage().size()
             total_numel += numel
             element_size = tensor.storage().element_size()
-            mem = numel*element_size /1024/1024 # 32bit=4Byte, MByte
+            mem = numel * element_size / 1024 / 1024  # 32bit=4Byte, MByte
             total_mem += mem
             element_type = type(tensor).__name__
             size = tuple(tensor.size())
@@ -188,34 +195,39 @@ def mem_report():
             #     element_type,
             #     size,
             #     mem) )
-        print('Type: %s Total Tensors: %d \tUsed Memory Space: %.2f MBytes' % (mem_type, total_numel, total_mem) )
+        print(
+            "Type: %s Total Tensors: %d \tUsed Memory Space: %.2f MBytes"
+            % (mem_type, total_numel, total_mem)
+        )
 
     gc.collect()
 
     LEN = 65
     objects = gc.get_objects()
-    #print('%s\t%s\t\t\t%s' %('Element type', 'Size', 'Used MEM(MBytes)') )
+    # print('%s\t%s\t\t\t%s' %('Element type', 'Size', 'Used MEM(MBytes)') )
     tensors = [obj for obj in objects if torch.is_tensor(obj)]
     cuda_tensors = [t for t in tensors if t.is_cuda]
     host_tensors = [t for t in tensors if not t.is_cuda]
-    _mem_report(cuda_tensors, 'GPU')
-    _mem_report(host_tensors, 'CPU')
-    print('='*LEN)
+    _mem_report(cuda_tensors, "GPU")
+    _mem_report(host_tensors, "CPU")
+    print("=" * LEN)
+
 
 def grad_norm(params):
-    grad_norm = 0.
+    grad_norm = 0.0
     for p in params:
         if p.grad is not None:
-            grad_norm += torch.sum(p.grad ** 2)
+            grad_norm += torch.sum(p.grad**2)
     return torch.sqrt(grad_norm)
+
 
 def print_leaf_nodes(grad_fn, id_set):
     if grad_fn is None:
         return
-    if hasattr(grad_fn, 'variable'):
+    if hasattr(grad_fn, "variable"):
         mem_id = id(grad_fn.variable)
-        if not(mem_id in id_set):
-            print('is leaf:', grad_fn.variable.is_leaf)
+        if not (mem_id in id_set):
+            print("is leaf:", grad_fn.variable.is_leaf)
             print(grad_fn.variable)
             id_set.add(mem_id)
 
@@ -223,10 +235,48 @@ def print_leaf_nodes(grad_fn, id_set):
     for i in range(len(grad_fn.next_functions)):
         print_leaf_nodes(grad_fn.next_functions[i][0], id_set)
 
+
 def policy_kl(p0_mu, p0_sigma, p1_mu, p1_sigma):
-    c1 = torch.log(p1_sigma/p0_sigma + 1e-5)
-    c2 = (p0_sigma**2 + (p1_mu - p0_mu)**2)/(2.0 * (p1_sigma**2 + 1e-5))
+    c1 = torch.log(p1_sigma / p0_sigma + 1e-5)
+    c2 = (p0_sigma**2 + (p1_mu - p0_mu) ** 2) / (2.0 * (p1_sigma**2 + 1e-5))
     c3 = -1.0 / 2.0
     kl = c1 + c2 + c3
-    kl = kl.sum(dim=-1) # returning mean between all steps of sum between all actions
+    kl = kl.sum(dim=-1)  # returning mean between all steps of sum between all actions
     return kl.mean()
+
+
+def jacobian(f, input):
+    """Computes the jacobian of function f with respect to the input"""
+    num_envs, input_dim = input.shape
+    output = f(input)
+    # outputs should be of shape []
+    output_dim = output.shape[1]
+    jacobians = torch.empty((num_envs, output_dim, input_dim), dtype=torch.float32)
+    for out_idx in range(output_dim):
+        select_index = torch.zeros(output_dim)
+        select_index[out_idx] = 1.0
+        e = torch.tile(select_index, (num_envs, 1)).cuda()
+        output.backward(e, retain_graph=True)
+        vector_jacobian = input.grad
+        jacobians[:, out_idx, :] = vector_jacobian.view(num_envs, input_dim)
+        input.grad.zero_()
+
+    return jacobians
+
+
+def jacobian2(output, input):
+    """Computes the jacobian of function f with respect to the input"""
+    num_envs, input_dim = input.shape
+    output_dim = output.shape[1]
+    jacobians = torch.empty((num_envs, output_dim, input_dim), dtype=torch.float32)
+    for out_idx in range(output_dim):
+        select_index = torch.zeros(output_dim)
+        select_index[out_idx] = 1.0
+        e = torch.tile(select_index, (num_envs, 1)).cuda()
+        # retain = out_idx != output_dim - 1  # NOTE: experimental
+        (grad,) = torch.autograd.grad(
+            outputs=output, inputs=input, grad_outputs=e, retain_graph=True
+        )
+        jacobians[:, out_idx, :] = grad.view(num_envs, input_dim)
+
+    return jacobians
