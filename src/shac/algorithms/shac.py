@@ -97,6 +97,7 @@ class SHAC:
 
         self.truncate_grad = cfg["params"]["config"]["truncate_grads"]
         self.grad_norm = cfg["params"]["config"]["grad_norm"]
+        self.contact_truncation = cfg["params"]["config"].get("contact_truncation", False)
 
         if cfg["params"]["general"]["train"]:
             self.log_dir = cfg["params"]["general"]["logdir"]
@@ -206,6 +207,7 @@ class SHAC:
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.horizon_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
@@ -214,6 +216,7 @@ class SHAC:
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_discounted_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
+        self.horizon_length_meter = AverageMeter(1, 100).to(self.device)
         self.score_keys = cfg["params"]["config"].get("score_keys", [])
         self.episode_scores_meter_map = {
             key + "_final": AverageMeter(1, 100).to(self.device) for key in self.score_keys
@@ -280,8 +283,12 @@ class SHAC:
 
             self.episode_length += 1
 
-            done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
-            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+            trunc = extra_info.get("contact_changed", torch.zeros_like(done))
+            if not self.contact_truncation:
+                is_done = done.clone()
+            else:
+                is_done = done.clone()
+            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
 
             if self.critic_name == "CriticMLP":
                 next_values[i + 1] = self.target_critic(obs).squeeze(-1)
@@ -295,7 +302,7 @@ class SHAC:
                     or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
                 ):  # ugly fix for nan values
                     next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length:  # early termination
+                elif self.episode_length[id] < self.max_episode_length and (not self.contact_truncation or not trunc[id]):
                     next_values[i + 1, id] = 0.0
                 else:  # otherwise, use terminal value critic to estimate the long-term performance
                     if self.obs_rms is not None:
@@ -371,6 +378,16 @@ class SHAC:
         self.actor_loss = actor_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
+
+        # logging of horizon lengths
+        rew_acc_ = rew_acc.detach().cpu().numpy()
+        rollout_lens = np.array([])
+        for j in range(rew_acc_.shape[1]):
+            idx = np.argwhere(rew_acc_[:, j] == 0.0)
+            idx = np.append(idx, len(rew_acc_) - 1)
+            rollout_lens = np.append(rollout_lens, np.diff(idx))
+        # rollout_lens is a 1D array of lenghts of each rollout
+        self.rollout_len = np.mean(rollout_lens)
 
         return actor_loss
 
@@ -641,6 +658,10 @@ class SHAC:
                 self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
                 self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
                 self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
+
+                self.writer.add_scalar("rollout_len/step", self.rollout_len, self.step_count)
+                self.writer.add_scalar("rollout_len/iter", self.rollout_len, self.iter_count)
+
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf

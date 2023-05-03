@@ -200,8 +200,8 @@ class HopperEnv(DFlexEnv):
             self.sim_substeps,
             self.MM_caching_frequency,
         )
-        contacts_changed = next_state.contact_changed.clone() != self.state.contact_changed.clone()
-        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
+        contact_changed = next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
 
@@ -222,7 +222,7 @@ class HopperEnv(DFlexEnv):
                 "episode_end": self.termination_buf,
             }
 
-        self.extras["contacts_changed"] = contacts_changed
+        self.extras["contact_changed"] = contact_changed
 
         if len(env_ids) > 0:
             self.reset(env_ids)

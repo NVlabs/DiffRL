@@ -14,7 +14,7 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: False
+  run_wandb: True
   seed: 42
   train: True
   checkpoint:
