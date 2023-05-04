@@ -302,7 +302,9 @@ class SHAC:
                     or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
                 ):  # ugly fix for nan values
                     next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length and (not self.contact_truncation or not trunc[id]):
+                elif self.episode_length[id] < self.max_episode_length and (
+                    not self.contact_truncation or not trunc[id]
+                ):
                     next_values[i + 1, id] = 0.0
                 else:  # otherwise, use terminal value critic to estimate the long-term performance
                     if self.obs_rms is not None:
@@ -668,10 +670,11 @@ class SHAC:
                 mean_episode_length = 0
 
             print(
-                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, rollout len {:.1f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
+                    self.rollout_len,
                     mean_episode_length,
                     self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch),
                     self.value_loss,

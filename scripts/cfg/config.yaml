@@ -2,6 +2,17 @@ defaults:
   - _self_
   - env: cartpole
   - alg: shac
+  - override hydra/launcher: submitit_local
+
+
+hydra:
+  sweep:
+    dir: checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
+  launcher:
+    gpus_per_node: 1
+    tasks_per_node: 4
+    cpus_per_task: 8
 
 exp_name: shac_benchmarks
 
