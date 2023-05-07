@@ -2,18 +2,18 @@ defaults:
   - _self_
   - env: cartpole
   - alg: shac
-  - override hydra/launcher: submitit_local
+  # - override hydra/launcher: submitit_local
 
 
 hydra:
   sweep:
     dir: checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
-  launcher:
-    gpus_per_node: 1
-    tasks_per_node: 4
-    cpus_per_task: 8
-
+  # launcher: # submitit_slurm launcher params
+  #   gpus_per_node: 1
+  #   tasks_per_node: 4
+  #   cpus_per_task: 8
+  #
 exp_name: shac_benchmarks
 
 resume_model: null
@@ -25,7 +25,7 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: True
+  run_wandb: False
   seed: 42
   train: True
   checkpoint:
@@ -40,6 +40,25 @@ env:
   player:
     games_num: 12
     num_actors: 4
+
+  ppo:
+    max_epochs: 2000 
+    minibatch_size: 1920
+    save_interval: 400
+    save_best_after: 100
+    num_actors: 1024
+    steps_num: 240
+    actor_mlp:
+      units: 
+        - 128
+        - 64
+        - 32
+    critic_mlp:
+      units:
+        - 64
+        - 64
+    lr: 3e-4
+    lr_schedule: adaptive
 
   shac:
     lambda: 0.95

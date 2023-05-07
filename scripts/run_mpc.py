@@ -27,6 +27,7 @@ def main(cfg: DictConfig):
     rewards = run_planner(planner, eval_env)
 
     plt.plot(rewards)
+    print(sum(rewards))
     plt.savefig("rewards.png")
     np.save("rewards.npy", np.asarray(rewards))
 

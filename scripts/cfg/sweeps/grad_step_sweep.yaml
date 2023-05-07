@@ -1,0 +1,32 @@
+name: shac_grad_step
+program: train.py
+method: bayes
+project: shac
+entity: dmanip-rss
+metric:
+  name: best_policy_loss/iter
+  goal: minimize
+parameters:
+  alg:
+    value: shac
+  env:
+    value: hopper
+  alg.params.config.grad_norm:
+    values: 1e-1, 5e-1, 1, 1e1
+  alg.params.config.actor_learning_rate:
+    values: 1e-2, 1e-3, 2e-3, 1e-4, 3e-4
+  learning-rate:
+    distribution: log_uniform
+    min: 1e-5
+    max: 1e-1 
+  general.seed:
+    values: [0, 10, 20]
+  general.run_wandb:
+    value: True
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args_no_hyphens}
+  - "exp_name"
+  - "shac_grad_step_sweep"

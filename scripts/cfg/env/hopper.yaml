@@ -32,11 +32,22 @@ shac:
 
 ppo:
   max_epochs: 2000 
-  minibatch_size: 1920
+  minibatch_size: 8192
   save_interval: 400
   save_best_after: 100
   num_actors: 1024
   steps_num: 240
+  actor_mlp:
+    units: 
+      - 128
+      - 64
+      - 32
+  critic_mlp:
+    units:
+      - 64
+      - 64
+
+
 
 player:
   games_num: 1

@@ -14,7 +14,7 @@ config:
       _target_: dmanip.config.RewardConfig
       c_finger: 0.2
       c_q: 100
-      c_act: 0.001
+      c_act: 0.
 
 shac:
   actor_lr: 1e-3

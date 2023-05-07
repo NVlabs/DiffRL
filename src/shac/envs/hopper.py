@@ -45,6 +45,8 @@ class HopperEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=16,
         early_termination=True,
+        contact_ke=2.0e4,
+        contact_kd=1.0e3,
     ):
         num_obs = 11
         num_act = 3
@@ -63,6 +65,8 @@ class HopperEnv(DFlexEnv):
 
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd
 
         self.init_sim()
 
@@ -130,8 +134,8 @@ class HopperEnv(DFlexEnv):
                 density=1000.0,
                 stiffness=0.0,
                 damping=2.0,
-                contact_ke=2.0e4,
-                contact_kd=1.0e3,
+                contact_ke=self.contact_ke,
+                contact_kd=self.contact_kd,
                 contact_kf=1.0e3,
                 contact_mu=0.9,
                 limit_ke=1.0e3,
