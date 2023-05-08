@@ -26,11 +26,7 @@ def main(config: DictConfig):
     N = 128
     H = 40
 
-    w = np.random.normal(0.0, std, (N, m))
-    w[0] = 0.0  # for baseline
-    w = np.append(w, np.zeros((N, 1)), axis=1)
-
-    env = Bounce(w, num_envs=N, num_steps=H, profile=False, render=False)
+    env = Bounce(num_envs=N, num_steps=H, std=std)
 
     # get last model jacobians
     print("Computing dynamics jacobians")
@@ -73,7 +69,7 @@ def main(config: DictConfig):
 
     jacs = np.array(jacs)
     print("Jacobian has shape", jacs.shape)
-    np.save("jacs", jacs)
+    np.save("jacobians", jacs)
 
     # save trajectory
     print("Saving trajectory")

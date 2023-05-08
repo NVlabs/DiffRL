@@ -20,9 +20,10 @@
 import os
 import numpy as np
 from typing import List
+from tqdm import tqdm, trange
 
 import warp as wp
-import warp.sim
+import warp.sim as sim
 import warp.sim.render
 
 wp.init()
@@ -41,7 +42,6 @@ class Bounce:
 
     def __init__(
         self,
-        noise,
         num_envs=32,
         num_steps=200,
         start_state=np.array([-0.5, 1.0, 0.0]),
@@ -49,31 +49,49 @@ class Bounce:
         render=False,
         profile=False,
         adapter=None,
+        soft_contact_ke=1e4,  # stiffness
+        soft_contact_kf=1e0,  # stiffness of friction
+        soft_contact_kd=1e1,  # damping
+        soft_contact_mu=0.9,  # friction coefficient
+        soft_contact_margin=1e1,
+        std=1e-1,
     ):
         self.device = wp.get_device(adapter)
         self.profile = profile
         self.render = render
         self.num_envs = num_envs
-        self.noise = noise
+
+        self.start_state = start_state
+        self.start_vel = start_vel
+        self.std = std
 
         # sim frequency
         self.frame_steps = num_steps
         self.sim_steps = self.frame_steps * self.sim_substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
-        builder = wp.sim.ModelBuilder()
+        noise = self.noise()
+        builder: sim.ModelBuilder = wp.sim.ModelBuilder()
         for i in range(self.num_envs):
             builder.add_particle(pos=start_state, vel=start_vel + noise[i], mass=1.0)
-        builder.add_shape_box(body=-1, pos=(2.0, 1.0, 0.0), hx=0.25, hy=1.0, hz=1.0)
 
-        self.model = builder.finalize(self.device)
+        # for a large number of environments
+        builder.soft_contact_max = 256 * 1024
+
+        # high wall
+        builder.add_shape_box(body=-1, pos=(2.0, 0.65, 0.0), hx=0.25, hy=0.65, hz=0.5)
+
+        # short wall
+        # builder.add_shape_box(body=-1, pos=(2.0, 0.5, 0.0), hx=0.25, hy=0.5, hz=0.5)
+
+        self.model: sim.Model = builder.finalize(self.device)
         self.model.ground = True
 
-        self.model.soft_contact_ke = 1e4  # stiffness
-        self.model.soft_contact_kf = 1e0  # stiffness of friction
-        self.model.soft_contact_kd = 1e1  # damping
-        self.model.soft_contact_mu = 0.25  # friction coefficient
-        self.model.soft_contact_margin = 1e1
+        self.model.soft_contact_ke = soft_contact_ke
+        self.model.soft_contact_kf = soft_contact_kf
+        self.model.soft_contact_kd = soft_contact_kd
+        self.model.soft_contact_mu = soft_contact_mu
+        self.model.soft_contact_margin = soft_contact_margin
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
@@ -90,9 +108,6 @@ class Bounce:
         for i in range(self.sim_steps + 1):
             self.states.append(self.model.state(requires_grad=True))
 
-        # one-shot contact creation (valid if we're doing simple collision against a constant normal plane)
-        wp.sim.collide(self.model, self.states[0])
-
         if self.render:
             self.stage = wp.sim.render.SimRenderer(
                 self.model,
@@ -101,6 +116,40 @@ class Bounce:
                 ),
                 scaling=40.0,
             )
+
+    def noise(self):
+        noise = np.random.normal(0.0, self.std, (self.num_envs, 2))
+        noise[0] = 0.0  # for baseline
+        self.noise_ = np.append(noise, np.zeros((self.num_envs, 1)), axis=1)
+        return self.noise_
+
+    def reset(self, start_state=None, start_vel=None):
+        if start_state is None:
+            start_state = self.start_state
+
+        if start_vel is None:
+            start_vel = self.start_vel
+
+        # replicate array if necessary and assign
+        q = np.array(start_state)
+        if q.ndim == 1:
+            q = np.tile(q, (self.num_envs, 1))
+        q = wp.array(q, dtype=wp.vec3)
+        self.model.particle_q.assign(q)
+
+        # replicate array if necessary and assign
+        qd = np.array(start_vel)
+        if qd.ndim == 1:
+            qd = np.tile(qd, (self.num_envs, 1))
+        qd += self.noise()
+        qd = wp.array(qd, dtype=wp.vec3)
+        self.model.particle_qd.assign(qd)
+
+        # only need to reset first state as everything is forward simulated from it
+        self.states[0] = self.model.state(requires_grad=True)
+
+        self.loss.zero_()
+        self.l.zero_()
 
     @wp.kernel
     def loss_kernel(
@@ -158,7 +207,7 @@ class Bounce:
         # run control loop
         for i in range(self.sim_steps):
             self.states[i].clear_forces()
-
+            wp.sim.collide(self.model, self.states[i])
             self.integrator.simulate(
                 self.model, self.states[i], self.states[i + 1], self.sim_dt
             )
@@ -264,73 +313,93 @@ class Bounce:
 
     def trajectory(self):
         xy = []
-        for state in self.states:
-            xy.append(state.particle_q.numpy())
+        for s in self.states:
+            pos = s.particle_q.numpy()[:, :2]
+            vel = s.particle_qd.numpy()[:, :2]
+            xy.append(np.concatenate((pos, vel), axis=-1))
         return np.array(xy)
 
-    def train(self, iters, clip=False, norm=False, tol=1e-4):
+    def train(
+        self,
+        iters,
+        clip=False,
+        norm=False,
+        zero_order=False,
+        tol=1e-4,
+    ):
         losses = []
         trajectories = []
-        for i in range(iters):
-            tape = wp.Tape()
+        with trange(iters) as t:
+            for i in t:
+                tape = wp.Tape()
 
-            with wp.ScopedTimer("Forward", active=self.profile):
-                with tape:
-                    self.compute_loss()
-                    self.sum_loss()
+                with wp.ScopedTimer("Forward", active=self.profile):
+                    with tape:
+                        self.compute_loss()
+                        self.sum_loss()
 
-            with wp.ScopedTimer("Backward", active=self.profile):
-                tape.backward(self.l)
+                with wp.ScopedTimer("Backward", active=self.profile):
+                    if not zero_order:
+                        tape.backward(self.l)
 
-            if self.render:
-                with wp.ScopedTimer("Render", active=self.profile):
-                    self.render_iter(i)
+                if self.render:
+                    with wp.ScopedTimer("Render", active=self.profile):
+                        self.render_iter(i)
 
-            with wp.ScopedTimer("Step", active=self.profile):
-                # need to take the mean of first qd
-                x = self.states[0].particle_qd
-                x = x.numpy()
-                x = x.mean(axis=0)
+                with wp.ScopedTimer("Step", active=self.profile):
+                    # need to take the mean of first qd
+                    x = self.states[0].particle_qd
+                    x = x.numpy()
+                    x = x.mean(axis=0)
 
-                # need to take the mean of gradients
-                x_grad = tape.gradients[self.states[0].particle_qd]
-                x_grad = x_grad.numpy()
-                x_grad = x_grad.mean(axis=0)
+                    # need to take the mean of gradients
+                    if zero_order:
+                        loss = self.loss.numpy()
+                        baseline = loss[0]
+                        x_grad = (
+                            1
+                            / self.std**2
+                            * (loss[..., None] - baseline)
+                            * self.noise_
+                        )
+                        x_grad = x_grad.mean(axis=0)
+                    else:
+                        x_grad = tape.gradients[self.states[0].particle_qd]
+                        x_grad = x_grad.numpy()
+                        x_grad = x_grad.mean(axis=0)
 
-                if clip:
-                    x_grad = np.clip(x_grad, -clip, clip)
+                    if clip:
+                        x_grad = np.clip(x_grad, -clip, clip)
 
-                if norm:
-                    x_grad = norm * x_grad / np.linalg.norm(x_grad)
+                    if norm:
+                        x_grad = norm * x_grad / np.linalg.norm(x_grad)
 
-                losses.append(self.loss.numpy())
-                trajectories.append(self.trajectory())
+                    losses.append(self.loss.numpy())
+                    trajectories.append(self.trajectory())
 
-                print(f"Iter: {i} Loss: {self.l}")
-                print(f"X: {x} Grad: {x_grad}")
+                    t.set_postfix(loss=self.l.numpy() / self.num_envs)
 
-                # apply it to the initial state
-                x = x - x_grad * self.train_rate
+                    # apply it to the initial state
+                    x = x - x_grad * self.train_rate
 
-                # then add noise again and set to environments
-                x = x + self.noise
-                self.states[0].particle_qd = wp.from_numpy(
-                    x, dtype=wp.vec3, requires_grad=True
-                )
+                    # then add noise again and set to environments
+                    x = x + self.noise()
+                    self.states[0].particle_qd = wp.from_numpy(
+                        x, dtype=wp.vec3, requires_grad=True
+                    )
 
-            tape.zero()
+                # clear grad and loss for next iteration
+                tape.zero()
+                self.loss = wp.zeros_like(self.loss, requires_grad=True)
+                self.l = wp.zeros_like(self.l, requires_grad=True)
 
-            # clear grad and loss for next iteration
-            tape.zero()
-            self.loss = wp.zeros_like(self.loss, requires_grad=True)
-            self.l = wp.zeros_like(self.l, requires_grad=True)
+                # early stopping
+                # if len(losses) > 2:
+                #     if np.abs(losses[-2].mean() - losses[-1].mean()) < tol:
+                #         print("Early stopping at iter", i)
+                #         break
 
-            if len(losses) > 2:
-                if np.abs(losses[-1].mean() - losses[-2].mean()) < tol:
-                    print("Early stopping at iter", i)
-                    break
-
-        return np.array(losses), np.array(trajectories)
+            return np.array(losses), np.array(trajectories)
 
     def train_graph(self, iters, clip=False, norm=False, tol=1e-4):
         # capture forward/backward passes
