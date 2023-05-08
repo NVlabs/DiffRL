@@ -6,7 +6,7 @@ from shac.utils import hydra_utils
 from shac.algorithms.shac import SHAC
 from shac.algorithms.shac2 import SHAC as SHAC2
 from shac.utils.common import *
-from shac.utils.rlgames_utils import RLGPUEnvAlgoObserver, RLGPUEnv
+from shac.utils.rlgames_utils import RLGPUEnvAlgoObserver, RLGPUEnv, parse_diff_env_kwargs
 from shac import envs
 from gym import wrappers
 from rl_games.torch_runner import Runner

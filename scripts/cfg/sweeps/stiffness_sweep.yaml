@@ -11,14 +11,10 @@ parameters:
     value: shac
   env:
     value: hopper
-  alg.params.config.grad_norm:
-    values: 1e-1, 5e-1, 1, 1e1
-  alg.params.config.actor_learning_rate:
-    values: 1e-2, 1e-3, 2e-3, 1e-4, 3e-4
-  learning-rate:
-    distribution: log_uniform
-    min: 1e-5
-    max: 1e-1 
+  env.config.contact_ke:
+    values: [1e2, 1e3, 1e4, 1e5]
+  env.config.contact_kd:
+    value: None
   general.seed:
     values: [0, 10, 20]
   general.run_wandb:
@@ -28,5 +24,4 @@ command:
   - ${interpreter}
   - ${program}
   - ${args_no_hyphens}
-  - "exp_name"
-  - "shac_grad_step_sweep"
+  - "exp_name=shac_stiff_sweep"

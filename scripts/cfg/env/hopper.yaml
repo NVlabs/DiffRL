@@ -11,6 +11,8 @@ config:
   stochastic_init: True
   MM_caching_frequency: 4
   early_termination: True
+  contact_ke: 2e4
+  contact_kd: 1e3
     
 shac:
   actor_lr: 2e-3
