@@ -60,7 +60,7 @@ params:
     truncate_grads: True
     e_clip: 0.2
     num_actors: ${resolve_default:2048,${env.ppo.num_actors}}
-    steps_num: ${resolve_default:32,${env.ppo.max_epochs}}
+    steps_num: ${resolve_default:32,${env.ppo.steps_num}}
     minibatch_size: ${resolve_default:16384,${env.ppo.minibatch_size}}
     mini_epochs: 5
     critic_coef: 4
