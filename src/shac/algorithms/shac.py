@@ -68,17 +68,21 @@ class SHAC:
 
         self.gamma = cfg["params"]["config"].get("gamma", 0.99)
 
-        self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")  # ['one-step', 'td-lambda']
-        if self.critic_method == "td-lambda":
-            self.lam = cfg["params"]["config"].get("lambda", 0.95)
+        self.critic_method = cfg["params"]["config"]["critic_method"]
+        assert self.critic_method in ["one-step", "td-lambda"]
+        self.lam = cfg["params"]["config"].get("lambda", 0.95)
 
+        self.steps_min = cfg["params"]["config"].get("steps_min", 0)
         self.steps_num = cfg["params"]["config"]["steps_num"]
+        self.contact_th = cfg["params"]["config"].get("contact_theshold", 1e9)
         self.max_epochs = cfg["params"]["config"]["max_epochs"]
         self.actor_lr = float(cfg["params"]["config"]["actor_learning_rate"])
         self.critic_lr = float(cfg["params"]["config"]["critic_learning_rate"])
         self.lr_schedule = cfg["params"]["config"].get("lr_schedule", "linear")
 
-        self.target_critic_alpha = cfg["params"]["config"].get("target_critic_alpha", 0.4)
+        self.target_critic_alpha = cfg["params"]["config"].get(
+            "target_critic_alpha", 0.4
+        )
 
         self.obs_rms = None
         if cfg["params"]["config"].get("obs_rms", False):
@@ -124,18 +128,29 @@ class SHAC:
             )
             self.steps_num = self.env.episode_length
 
+        self.eval_runs = cfg["params"]["config"]["player"]["games_num"]
+
         # create actor critic network
         self.actor_name = cfg["params"]["network"].get(
             "actor", "ActorStochasticMLP"
         )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
         self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
         actor_fn = getattr(actor_models, self.actor_name)
-        self.actor = actor_fn(self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device)
+        self.actor = actor_fn(
+            self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
+        )
         critic_fn = getattr(critic_models, self.critic_name)
         if self.critic_name == "CriticMLP":
-            self.critic = critic_fn(self.num_obs, cfg["params"]["network"], device=self.device)
+            self.critic = critic_fn(
+                self.num_obs, cfg["params"]["network"], device=self.device
+            )
         else:
-            self.critic = critic_fn(self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device)
+            self.critic = critic_fn(
+                self.num_obs,
+                self.num_actions,
+                cfg["params"]["network"],
+                device=self.device,
+            )
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
@@ -166,10 +181,18 @@ class SHAC:
                 dtype=torch.float32,
                 device=self.device,
             )
-        self.rew_buf = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.done_mask = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.next_values = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.target_values = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
+        self.rew_buf = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.done_mask = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.next_values = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.target_values = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
         self.ret = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
 
         # for kl divergence computing
@@ -202,13 +225,22 @@ class SHAC:
         self.episode_length_his = []
         self.episode_loss_his = []
         self.episode_discounted_loss_his = []
-        self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
+        self.truncations = []
+        self.early_stops = []
+        self.episode_ends = []
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -216,16 +248,21 @@ class SHAC:
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
         self.score_keys = cfg["params"]["config"].get("score_keys", [])
         self.episode_scores_meter_map = {
-            key + "_final": AverageMeter(1, 100).to(self.device) for key in self.score_keys
+            key + "_final": AverageMeter(1, 100).to(self.device)
+            for key in self.score_keys
         }
 
         # timer
         self.time_report = TimeReport()
 
     def compute_actor_loss(self, deterministic=False):
-        rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
+        rew_acc = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
+        next_values = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
 
@@ -244,6 +281,11 @@ class SHAC:
                 self.obs_rms.update(obs)
             # normalize the current obs
             obs = obs_rms.normalize(obs)
+
+        self.rollout_len = 0  # accumulates all lens in a rollout
+        rollout_len = torch.zeros((self.num_envs,), device=self.device)
+
+        # Start short horizon rollout
         for i in range(self.steps_num):
             # collect data for critic training
             with torch.no_grad():
@@ -255,7 +297,14 @@ class SHAC:
                 with torch.no_grad():
                     self.act_buf[i] = actions.clone()
 
-            obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
+            obs, rew, term, trunc, extra_info = self.env.step(torch.tanh(actions))
+
+            # sanity check; shouldn't get both trunc and term
+            assert not torch.any(trunc & term)
+
+            # episode is done because we have reset the environment
+            ep_done = trunc | term
+            ep_done_env_ids = ep_done.nonzero(as_tuple=False).squeeze(-1).cpu()
 
             with torch.no_grad():
                 raw_rew = rew.clone()
@@ -279,49 +328,74 @@ class SHAC:
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
             self.episode_length += 1
+            rollout_len += 1
 
-            done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
-            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+            # for logging
+            self.early_stops.append(term.cpu().numpy())
+            self.episode_ends.append(trunc.cpu().numpy())
+            self.truncations.append(trunc.cpu().numpy())
 
+            # TODO why is next values computed at every step?
             if self.critic_name == "CriticMLP":
                 next_values[i + 1] = self.target_critic(obs).squeeze(-1)
             else:
-                next_values[i + 1] = self.target_critic(obs, torch.tanh(actions)).squeeze(-1)
+                act = torch.tanh(actions)
+                next_values[i + 1] = self.target_critic(obs, act).squeeze(-1)
 
-            for id in done_env_ids:
+            # handle terminated environments
+            term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
+            for id in term_env_ids:
+                next_values[i + 1, id] = 0.0
+
+            # handle truncated environments
+            trunc_env_ids = trunc.nonzero(as_tuple=False).squeeze(-1)
+            for id in trunc_env_ids:
+                # sanity check
                 if (
                     torch.isnan(extra_info["obs_before_reset"][id]).sum() > 0
                     or torch.isinf(extra_info["obs_before_reset"][id]).sum() > 0
                     or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
-                ):  # ugly fix for nan values
-                    next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length:  # early termination
-                    next_values[i + 1, id] = 0.0
-                else:  # otherwise, use terminal value critic to estimate the long-term performance
-                    if self.obs_rms is not None:
-                        real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
-                    else:
-                        real_obs = extra_info["obs_before_reset"][id]
+                ):
+                    print("Got inf obs")
+                    raise ValueError
 
-                    if self.critic_name == "CriticMLP":
-                        next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
-                    else:
-                        real_act = torch.tanh(actions[id])
-                        next_values[i + 1, id] = self.target_critic(real_obs, real_act).squeeze(-1)
+                if self.obs_rms is not None:
+                    real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
+                else:
+                    real_obs = extra_info["obs_before_reset"][id]
 
-            if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
+                if self.critic_name == "CriticMLP":
+                    next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
+                else:
+                    a = torch.tanh(actions[id])
+                    next_values[i + 1, id] = self.target_critic(real_obs, a).squeeze(-1)
+
+            # sanity check
+            if (next_values[i + 1] > 1e6).sum() > 0 or (
+                next_values[i + 1] < -1e6
+            ).sum() > 0:
                 print("next value error")
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
+            # now merge truncation and termination into done
+            done = term | trunc
+            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+
             if i < self.steps_num - 1:
+                # first terminate all rollouts which are 'done'
                 actor_loss += (
-                    -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
+                    -rew_acc[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values[i + 1, done_env_ids]
                 ).sum()
             else:
-                # terminate all envs at the end of optimization iteration
-                actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
+                # terminate all envs because we reached the end of our rollout
+                actor_loss += (
+                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
+                ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
@@ -329,8 +403,11 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
+            self.rollout_len += rollout_len[done_env_ids].sum().item()
+            rollout_len[done_env_ids] = 0
 
             # collect data for critic training
+            # TODO should behaviour before be the same for all of them?
             with torch.no_grad():
                 self.rew_buf[i] = rew.clone()
                 if i < self.steps_num - 1:
@@ -344,24 +421,41 @@ class SHAC:
                 self.episode_loss -= raw_rew
                 self.episode_discounted_loss -= self.episode_gamma * raw_rew
                 self.episode_gamma *= self.gamma
-                if len(done_env_ids) > 0:
-                    self.episode_loss_meter.update(self.episode_loss[done_env_ids])
-                    self.episode_discounted_loss_meter.update(self.episode_discounted_loss[done_env_ids])
-                    self.episode_length_meter.update(self.episode_length[done_env_ids])
-                    for k, v in filter(lambda x: x[0] in self.score_keys, extra_info.items()):
-                        self.episode_scores_meter_map[k + "_final"].update(v[done_env_ids])
-                    for done_env_id in done_env_ids:
-                        if self.episode_loss[done_env_id] > 1e6 or self.episode_loss[done_env_id] < -1e6:
+                if len(ep_done_env_ids) > 0:
+                    self.episode_loss_meter.update(self.episode_loss[ep_done_env_ids])
+                    self.episode_discounted_loss_meter.update(
+                        self.episode_discounted_loss[ep_done_env_ids]
+                    )
+                    self.episode_length_meter.update(
+                        self.episode_length[ep_done_env_ids]
+                    )
+                    for k, v in filter(
+                        lambda x: x[0] in self.score_keys, extra_info.items()
+                    ):
+                        self.episode_scores_meter_map[k + "_final"].update(
+                            v[ep_done_env_ids]
+                        )
+                    for ep_done_env_ids in ep_done_env_ids:
+                        if (
+                            self.episode_loss[ep_done_env_ids] > 1e6
+                            or self.episode_loss[ep_done_env_ids] < -1e6
+                        ):
                             print("ep loss error")
                             raise ValueError
 
-                        self.episode_loss_his.append(self.episode_loss[done_env_id].item())
-                        self.episode_discounted_loss_his.append(self.episode_discounted_loss[done_env_id].item())
-                        self.episode_length_his.append(self.episode_length[done_env_id].item())
-                        self.episode_loss[done_env_id] = 0.0
-                        self.episode_discounted_loss[done_env_id] = 0.0
-                        self.episode_length[done_env_id] = 0
-                        self.episode_gamma[done_env_id] = 1.0
+                        self.episode_loss_his.append(
+                            self.episode_loss[ep_done_env_ids].item()
+                        )
+                        self.episode_discounted_loss_his.append(
+                            self.episode_discounted_loss[ep_done_env_ids].item()
+                        )
+                        self.episode_length_his.append(
+                            self.episode_length[ep_done_env_ids].item()
+                        )
+                        self.episode_loss[ep_done_env_ids] = 0.0
+                        self.episode_discounted_loss[ep_done_env_ids] = 0.0
+                        self.episode_length[ep_done_env_ids] = 0
+                        self.episode_gamma[ep_done_env_ids] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -372,6 +466,9 @@ class SHAC:
 
         self.step_count += self.steps_num * self.num_envs
 
+        self.rollout_len += rollout_len.sum().item()
+        self.rollout_len /= self.num_envs
+
         return actor_loss
 
     @torch.no_grad()
@@ -379,10 +476,16 @@ class SHAC:
         episode_length_his = []
         episode_loss_his = []
         episode_discounted_loss_his = []
-        episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         episode_length = torch.zeros(self.num_envs, dtype=int)
-        episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
         obs = self.env.reset()
 
@@ -393,7 +496,8 @@ class SHAC:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, done, _ = self.env.step(torch.tanh(actions))
+            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions))
+            done = term | trunc
 
             episode_length += 1
 
@@ -411,7 +515,9 @@ class SHAC:
                         )
                     )
                     episode_loss_his.append(episode_loss[done_env_id].item())
-                    episode_discounted_loss_his.append(episode_discounted_loss[done_env_id].item())
+                    episode_discounted_loss_his.append(
+                        episode_discounted_loss[done_env_id].item()
+                    )
                     episode_length_his.append(episode_length[done_env_id].item())
                     episode_loss[done_env_id] = 0.0
                     episode_discounted_loss[done_env_id] = 0.0
@@ -441,7 +547,11 @@ class SHAC:
                     + (1.0 - lam) / (1.0 - self.lam) * self.rew_buf[i]
                 )
                 Bi = (
-                    self.gamma * (self.next_values[i] * self.done_mask[i] + Bi * (1.0 - self.done_mask[i]))
+                    self.gamma
+                    * (
+                        self.next_values[i] * self.done_mask[i]
+                        + Bi * (1.0 - self.done_mask[i])
+                    )
                     + self.rew_buf[i]
                 )
                 self.target_values[i] = (1.0 - self.lam) * Ai + lam * Bi
@@ -452,7 +562,9 @@ class SHAC:
         if self.critic_name == "CriticMLP":
             predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
         else:
-            predicted_values = self.critic(batch_sample["obs"], batch_sample["act"]).squeeze(-1)
+            predicted_values = self.critic(
+                batch_sample["obs"], batch_sample["act"]
+            ).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -468,7 +580,9 @@ class SHAC:
             mean_policy_loss,
             mean_policy_discounted_loss,
             mean_episode_length,
-        ) = self.evaluate_policy(num_games=num_games, deterministic=not self.stochastic_evaluation)
+        ) = self.evaluate_policy(
+            num_games=num_games, deterministic=not self.stochastic_evaluation
+        )
         print_info(
             "mean episode loss = {}, mean discounted loss = {}, mean episode length = {}".format(
                 mean_policy_loss, mean_policy_discounted_loss, mean_episode_length
@@ -491,10 +605,16 @@ class SHAC:
 
         # initializations
         self.initialize_env()
-        self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
-        self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
         def actor_closure():
             self.actor_optimizer.zero_grad()
@@ -516,7 +636,10 @@ class SHAC:
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
 
                 # sanity check
-                if torch.isnan(self.grad_norm_before_clip) or self.grad_norm_before_clip > 1000000.0:
+                if (
+                    torch.isnan(self.grad_norm_before_clip)
+                    or self.grad_norm_before_clip > 1000000.0
+                ):
                     print("NaN gradient")
                     raise ValueError
 
@@ -530,11 +653,15 @@ class SHAC:
 
             # learning rate schedule
             if self.lr_schedule == "linear":
-                actor_lr = (1e-5 - self.actor_lr) * float(epoch / self.max_epochs) + self.actor_lr
+                actor_lr = (1e-5 - self.actor_lr) * float(
+                    epoch / self.max_epochs
+                ) + self.actor_lr
                 for param_group in self.actor_optimizer.param_groups:
                     param_group["lr"] = actor_lr
                 lr = actor_lr
-                critic_lr = (1e-5 - self.critic_lr) * float(epoch / self.max_epochs) + self.critic_lr
+                critic_lr = (1e-5 - self.critic_lr) * float(
+                    epoch / self.max_epochs
+                ) + self.critic_lr
                 for param_group in self.critic_optimizer.param_groups:
                     param_group["lr"] = critic_lr
             else:
@@ -551,10 +678,19 @@ class SHAC:
             with torch.no_grad():
                 self.compute_target_values()
                 if self.critic_name == "CriticMLP":
-                    dataset = CriticDataset(self.batch_size, self.obs_buf, self.target_values, drop_last=False)
+                    dataset = CriticDataset(
+                        self.batch_size,
+                        self.obs_buf,
+                        self.target_values,
+                        drop_last=False,
+                    )
                 else:
                     dataset = QCriticDataset(
-                        self.batch_size, self.obs_buf, self.act_buf, self.target_values, drop_last=False
+                        self.batch_size,
+                        self.obs_buf,
+                        self.act_buf,
+                        self.target_values,
+                        drop_last=False,
                     )
             self.time_report.end_timer("prepare critic dataset")
 
@@ -583,7 +719,9 @@ class SHAC:
 
                 self.value_loss = (total_critic_loss / batch_cnt).detach().cpu().item()
                 print(
-                    "value iter {}/{}, loss = {:7.6f}".format(j + 1, self.critic_iterations, self.value_loss),
+                    "value iter {}/{}, loss = {:7.6f}".format(
+                        j + 1, self.critic_iterations, self.value_loss
+                    ),
                     end="\r",
                 )
 
@@ -600,28 +738,63 @@ class SHAC:
             self.writer.add_scalar("actor_loss/iter", self.actor_loss, self.iter_count)
             self.writer.add_scalar("value_loss/step", self.value_loss, self.step_count)
             self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
+            # if hasattr(self, "rollout_len"): # should not be necessary
+            self.writer.add_scalar(
+                "rollout_len/step", self.rollout_len, self.step_count
+            )
+            self.writer.add_scalar(
+                "rollout_len/iter", self.rollout_len, self.iter_count
+            )
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
-                mean_policy_discounted_loss = self.episode_discounted_loss_meter.get_mean()
+                mean_policy_discounted_loss = (
+                    self.episode_discounted_loss_meter.get_mean()
+                )
 
                 if mean_policy_loss < self.best_policy_loss:
-                    print_info("save best policy with loss {:.2f}".format(mean_policy_loss))
+                    print_info(
+                        "save best policy with loss {:.2f}".format(mean_policy_loss)
+                    )
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.writer.add_scalar("policy_loss/step", mean_policy_loss, self.step_count)
-                self.writer.add_scalar("policy_loss/time", mean_policy_loss, time_elapse)
-                self.writer.add_scalar("policy_loss/iter", mean_policy_loss, self.iter_count)
-                self.writer.add_scalar("rewards/step", -mean_policy_loss, self.step_count)
+                self.writer.add_scalar(
+                    "policy_loss/step", mean_policy_loss, self.step_count
+                )
+                self.writer.add_scalar(
+                    "policy_loss/time", mean_policy_loss, time_elapse
+                )
+                self.writer.add_scalar(
+                    "policy_loss/iter", mean_policy_loss, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "rewards/step", -mean_policy_loss, self.step_count
+                )
                 self.writer.add_scalar("rewards/time", -mean_policy_loss, time_elapse)
-                self.writer.add_scalar("rewards/iter", -mean_policy_loss, self.iter_count)
-                if self.score_keys and len(self.episode_scores_meter_map[self.score_keys[0] + "_final"]) > 0:
+                self.writer.add_scalar(
+                    "rewards/iter", -mean_policy_loss, self.iter_count
+                )
+                if (
+                    self.score_keys
+                    and len(
+                        self.episode_scores_meter_map[self.score_keys[0] + "_final"]
+                    )
+                    > 0
+                ):
                     for score_key in self.score_keys:
-                        score = self.episode_scores_meter_map[score_key + "_final"].get_mean()
-                        self.writer.add_scalar("scores/{}/iter".format(score_key), score, self.iter_count)
-                        self.writer.add_scalar("scores/{}/step".format(score_key), score, self.step_count)
-                        self.writer.add_scalar("scores/{}/time".format(score_key), score, time_elapse)
+                        score = self.episode_scores_meter_map[
+                            score_key + "_final"
+                        ].get_mean()
+                        self.writer.add_scalar(
+                            "scores/{}/iter".format(score_key), score, self.iter_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/step".format(score_key), score, self.step_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/time".format(score_key), score, time_elapse
+                        )
                 self.writer.add_scalar(
                     "policy_discounted_loss/step",
                     mean_policy_discounted_loss,
@@ -632,27 +805,47 @@ class SHAC:
                     mean_policy_discounted_loss,
                     self.iter_count,
                 )
-                self.writer.add_scalar("best_policy_loss/step", self.best_policy_loss, self.step_count)
-                self.writer.add_scalar("best_policy_loss/iter", self.best_policy_loss, self.iter_count)
-                self.writer.add_scalar("episode_lengths/iter", mean_episode_length, self.iter_count)
-                self.writer.add_scalar("episode_lengths/step", mean_episode_length, self.step_count)
-                self.writer.add_scalar("episode_lengths/time", mean_episode_length, time_elapse)
+                self.writer.add_scalar(
+                    "best_policy_loss/step", self.best_policy_loss, self.step_count
+                )
+                self.writer.add_scalar(
+                    "best_policy_loss/iter", self.best_policy_loss, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/iter", mean_episode_length, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/step", mean_episode_length, self.step_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/time", mean_episode_length, time_elapse
+                )
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
                 self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
                 self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
                 self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
+                self.writer.add_scalar(
+                    "actor_grad_norm/iter", self.grad_norm_before_clip, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "actor_grad_norm/step", self.grad_norm_before_clip, self.step_count
+                )
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
 
             print(
-                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
+                    self.max_epochs,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch),
+                    self.rollout_len,
+                    self.steps_num
+                    * self.num_envs
+                    / (time_end_epoch - time_start_epoch),
                     self.value_loss,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,
@@ -662,12 +855,19 @@ class SHAC:
             self.writer.flush()
 
             if self.save_interval > 0 and (self.iter_count % self.save_interval == 0):
-                self.save(self.name + "policy_iter{}_reward{:.3f}".format(self.iter_count, -mean_policy_loss))
+                self.save(
+                    self.name
+                    + "policy_iter{}_reward{:.3f}".format(
+                        self.iter_count, -mean_policy_loss
+                    )
+                )
 
             # update target critic
             with torch.no_grad():
                 alpha = self.target_critic_alpha
-                for param, param_targ in zip(self.critic.parameters(), self.target_critic.parameters()):
+                for param, param_targ in zip(
+                    self.critic.parameters(), self.target_critic.parameters()
+                ):
                     param_targ.data.mul_(alpha)
                     param_targ.data.add_((1.0 - alpha) * param.data)
 
@@ -695,7 +895,7 @@ class SHAC:
         )
 
         # evaluate the final policy's performance
-        self.run(self.num_envs)
+        self.run(self.eval_runs)
 
         self.close()
 
@@ -712,12 +912,17 @@ class SHAC:
         )
 
     def load(self, path):
+        print("Loading policy from", path)
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
         self.target_critic = checkpoint[2].to(self.device)
         self.obs_rms = checkpoint[3].to(self.device)
-        self.ret_rms = checkpoint[4].to(self.device) if checkpoint[4] is not None else checkpoint[4]
+        self.ret_rms = (
+            checkpoint[4].to(self.device)
+            if checkpoint[4] is not None
+            else checkpoint[4]
+        )
 
     def close(self):
         self.writer.close()

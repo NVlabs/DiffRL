@@ -45,9 +45,13 @@ def train(cfg: DictConfig):
         if os.path.exists("exp_config.yaml"):
             old_config = yaml.load(open("exp_config.yaml", "r"))
             params, wandb_id = old_config["params"], old_config["wandb_id"]
-            run = create_wandb_run(cfg.wandb, params, wandb_id, run_wandb=cfg.general.run_wandb)
+            run = create_wandb_run(
+                cfg.wandb, params, wandb_id, run_wandb=cfg.general.run_wandb
+            )
             resume_model = "restore_checkpoint.zip"
-            assert os.path.exists(resume_model), "restore_checkpoint.zip does not exist!"
+            assert os.path.exists(
+                resume_model
+            ), "restore_checkpoint.zip does not exist!"
         else:
             defaults = HydraConfig.get().runtime.choices
 
@@ -80,6 +84,8 @@ def train(cfg: DictConfig):
             traj_optimizer = SHAC2(cfg)
 
         if not cfg.general.play:
+            if cfg_train["params"]["general"]["checkpoint"]:
+                traj_optimizer.load(cfg_train["params"]["general"]["checkpoint"])
             traj_optimizer.train()
         else:
             traj_optimizer.play(cfg_train)
