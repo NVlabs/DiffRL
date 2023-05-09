@@ -20,8 +20,7 @@ general:
   checkpoint:
   multi_gpu: False
   mixed_precision: False
-  num_envs: 
-
+  num_envs:
 
 # env-specific defaults for different algs
 env:
@@ -46,7 +45,7 @@ env:
     max_epochs: 2000
     save_interval: 400
     steps_num: 32
-    betas: 
+    betas:
       - 0.7
       - 0.95
 
