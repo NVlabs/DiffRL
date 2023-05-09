@@ -260,10 +260,6 @@ class AHAC:
     def compute_actor_loss(self, deterministic=False):
         # TODO this reward accummulation needs to be carried over from the previous rollout
         rew_acc = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
-        # I don't think we need this?
-        # next_values = torch.zeros(
-        #     (self.num_envs,), dtype=torch.float32, device=self.device
-        # )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
         actor_loss_terms = 0  # number of additions to actor_loss
@@ -275,12 +271,7 @@ class AHAC:
             if self.ret_rms is not None:
                 ret_var = self.ret_rms.var.clone()
 
-        # initialize trajectory to cut off gradients between episodes.
-        # obs = self.env.initialize_trajectory()  # no longer needed
-        # if hasattr(self, "last_done_ids"):
-        #     print("Clearing grads for", self.last_done_ids)
-        #     self.env.clear_grad_ids(self.last_done_ids)
-
+        # fetch last observations
         obs = self.env.obs_buf
         if self.obs_rms is not None:
             # update obs rms
@@ -293,7 +284,6 @@ class AHAC:
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
-        # i = 0
         # TODO need to also transfer some stuff between rollouts
         while actor_loss_terms < self.num_envs:
             # TODO fix and add back
@@ -304,20 +294,9 @@ class AHAC:
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
 
-            # sanity check; shouldn't get both trunc and term
-            # assert not torch.any(trunc & term)
-
             # episode is done because we have reset the environment
             ep_done = trunc | term
             ep_done_env_ids = ep_done.nonzero(as_tuple=False).squeeze(-1).cpu()
-
-            # NOTE: Doesn't seem to be used anywere; removed bloat
-            # with torch.no_grad():
-            # raw_rew = rew.clone()
-
-            # NOTE: doesn't seem to be used anywhere; removed bloat
-            # scale the reward
-            # rew = rew * self.rew_scale
 
             if self.obs_rms is not None:
                 # update obs rms
@@ -336,11 +315,6 @@ class AHAC:
 
             self.episode_length += 1
             rollout_len += 1
-
-            # NOTE: never verified that it works
-            # done = done.clone() | extra_info.get(
-            #     "contacts_changed", torch.zeros_like(done)
-            # )
 
             # for logging
             self.early_stops.append(term.cpu().numpy())
@@ -362,7 +336,6 @@ class AHAC:
             # for logging
             # self.truncations.append(trunc.cpu().numpy())
 
-            # TODO why is next values computed at every step?
             real_obs = info["obs_before_reset"]
             # sanity check
             if (~torch.isfinite(real_obs)).sum() > 0:
@@ -384,11 +357,10 @@ class AHAC:
                 print("next value error")
                 raise ValueError
 
-            # rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
             rew_acc += self.gamma**rollout_len * rew
 
             # now merge truncation and termination into done
-            cutoff = rollout_len > self.steps_num
+            cutoff = rollout_len >= self.steps_num
             if "jacobian" in info:
                 cutoff = cutoff | contact_trunc
             # print("terminated", term.nonzero().flatten().tolist())
@@ -402,24 +374,17 @@ class AHAC:
                 rew_acc[done_env_ids]
                 + self.gamma ** rollout_len[done_env_ids] * next_values[done_env_ids]
             ).sum()
+
+            # keep count of number of loss terms we've added so far
             actor_loss_terms += done.sum().item()
 
-            # compute gamma for next step
-            # gamma = gamma * self.gamma
-
-            # clear up gamma and rew_acc for done envs
-            # gamma[done_env_ids] = 1.0
+            # clear up buffers
             rew_acc[done_env_ids] = 0.0
             self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
-            # cut off gradients
-            # obs[done_env_ids] = obs[done_env_ids].clone()
-            # NOTE: The line below might actually be clearing all gradinets
-            # self.env.clear_grad_ids(done_env_ids)
-            # if len(done_env_ids) > 0:
+            # cut off gradients of all done envs
             self.env.clear_grad_ids(done_env_ids)
-            self.env.calculateObservations()
 
             # get observations again since we need them detached
             obs = self.env.obs_buf
@@ -429,7 +394,6 @@ class AHAC:
                     self.obs_rms.update(obs)
                 # normalize the current obs
                 obs = obs_rms.normalize(obs)
-            # self.last_done_ids = done_env_ids
 
             # collect data for critic training
             # TODO should behaviour before be the same for all of them?
@@ -481,7 +445,6 @@ class AHAC:
                         self.episode_length[ep_done_env_ids] = 0
                         self.episode_gamma[ep_done_env_ids] = 1.0
 
-        self.avg_rollout_len.extend(rollout_len.tolist())
         steps = np.sum(self.avg_rollout_len)
         self.avg_rollout_len = np.mean(self.avg_rollout_len)
         self.step_count += steps * self.num_envs
@@ -492,9 +455,6 @@ class AHAC:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().item()
-
-        # save for next call to this function
-        self.last_obs = obs
 
         return actor_loss
 
@@ -607,8 +567,6 @@ class AHAC:
                 self.obs_rms.update(obs)
             # normalize the current obs
             obs = self.obs_rms.normalize(obs)
-
-        self.last_obs = obs
 
     @torch.no_grad()
     def run(self, num_games):
