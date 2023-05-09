@@ -282,7 +282,7 @@ class SHAC:
             # normalize the current obs
             obs = obs_rms.normalize(obs)
 
-        self.rollout_len = 0  # accumulates all lens in a rollout
+        self.avg_rollout_len = []  # accumulates all lens in a rollout
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
@@ -300,7 +300,7 @@ class SHAC:
             obs, rew, term, trunc, extra_info = self.env.step(torch.tanh(actions))
 
             # sanity check; shouldn't get both trunc and term
-            assert not torch.any(trunc & term)
+            # assert not torch.any(trunc & term)
 
             # episode is done because we have reset the environment
             ep_done = trunc | term
@@ -342,11 +342,6 @@ class SHAC:
                 act = torch.tanh(actions)
                 next_values[i + 1] = self.target_critic(obs, act).squeeze(-1)
 
-            # handle terminated environments
-            term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
-            for id in term_env_ids:
-                next_values[i + 1, id] = 0.0
-
             # handle truncated environments
             trunc_env_ids = trunc.nonzero(as_tuple=False).squeeze(-1)
             for id in trunc_env_ids:
@@ -369,6 +364,11 @@ class SHAC:
                 else:
                     a = torch.tanh(actions[id])
                     next_values[i + 1, id] = self.target_critic(real_obs, a).squeeze(-1)
+
+            # handle terminated environments
+            term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
+            for id in term_env_ids:
+                next_values[i + 1, id] = 0.0
 
             # sanity check
             if (next_values[i + 1] > 1e6).sum() > 0 or (
@@ -403,7 +403,7 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
-            self.rollout_len += rollout_len[done_env_ids].sum().item()
+            self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
             # collect data for critic training
@@ -466,8 +466,8 @@ class SHAC:
 
         self.step_count += self.steps_num * self.num_envs
 
-        self.rollout_len += rollout_len.sum().item()
-        self.rollout_len /= self.num_envs
+        self.avg_rollout_len.extend(rollout_len.tolist())
+        self.avg_rollout_len = np.mean(self.avg_rollout_len)
 
         return actor_loss
 
@@ -740,10 +740,10 @@ class SHAC:
             self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
             # if hasattr(self, "rollout_len"): # should not be necessary
             self.writer.add_scalar(
-                "rollout_len/step", self.rollout_len, self.step_count
+                "rollout_len/step", self.avg_rollout_len, self.step_count
             )
             self.writer.add_scalar(
-                "rollout_len/iter", self.rollout_len, self.iter_count
+                "rollout_len/iter", self.avg_rollout_len, self.iter_count
             )
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
@@ -842,7 +842,7 @@ class SHAC:
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.rollout_len,
+                    self.avg_rollout_len,
                     self.steps_num
                     * self.num_envs
                     / (time_end_epoch - time_start_epoch),
