@@ -28,7 +28,7 @@ from shac.utils.time_report import TimeReport
 from shac.utils.average_meter import AverageMeter
 
 
-class SHAC:
+class AHAC:
     def __init__(self, cfg):
         env_name = cfg["params"]["diff_env"].pop("name")
         env_fn = getattr(envs, env_name)
@@ -238,7 +238,9 @@ class SHAC:
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
+        self.jacobians = []
         self.truncations = []
+        self.contact_changes = []
         self.early_stops = []
         self.episode_ends = []
 
@@ -256,15 +258,15 @@ class SHAC:
         self.time_report = TimeReport()
 
     def compute_actor_loss(self, deterministic=False):
-        rew_acc = torch.zeros(
-            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
-        )
-        gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        next_values = torch.zeros(
-            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
-        )
+        # TODO this reward accummulation needs to be carried over from the previous rollout
+        rew_acc = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
+        # I don't think we need this?
+        # next_values = torch.zeros(
+        #     (self.num_envs,), dtype=torch.float32, device=self.device
+        # )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        actor_loss_terms = 0  # number of additions to actor_loss
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -274,7 +276,12 @@ class SHAC:
                 ret_var = self.ret_rms.var.clone()
 
         # initialize trajectory to cut off gradients between episodes.
-        obs = self.env.initialize_trajectory()
+        # obs = self.env.initialize_trajectory()  # no longer needed
+        # if hasattr(self, "last_done_ids"):
+        #     print("Clearing grads for", self.last_done_ids)
+        #     self.env.clear_grad_ids(self.last_done_ids)
+
+        obs = self.env.obs_buf
         if self.obs_rms is not None:
             # update obs rms
             with torch.no_grad():
@@ -286,18 +293,16 @@ class SHAC:
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
-        for i in range(self.steps_num):
+        # i = 0
+        # TODO need to also transfer some stuff between rollouts
+        while actor_loss_terms < self.num_envs:
+            # TODO fix and add back
             # collect data for critic training
-            with torch.no_grad():
-                self.obs_buf[i] = obs.clone()
+            # with torch.no_grad():
+            # self.obs_buf[i] = obs.clone()
 
             actions = self.actor(obs, deterministic=deterministic)
-
-            if self.critic_name == "QCriticMLP":
-                with torch.no_grad():
-                    self.act_buf[i] = actions.clone()
-
-            obs, rew, term, trunc, extra_info = self.env.step(torch.tanh(actions))
+            obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
 
             # sanity check; shouldn't get both trunc and term
             # assert not torch.any(trunc & term)
@@ -306,11 +311,13 @@ class SHAC:
             ep_done = trunc | term
             ep_done_env_ids = ep_done.nonzero(as_tuple=False).squeeze(-1).cpu()
 
-            with torch.no_grad():
-                raw_rew = rew.clone()
+            # NOTE: Doesn't seem to be used anywere; removed bloat
+            # with torch.no_grad():
+            # raw_rew = rew.clone()
 
+            # NOTE: doesn't seem to be used anywhere; removed bloat
             # scale the reward
-            rew = rew * self.rew_scale
+            # rew = rew * self.rew_scale
 
             if self.obs_rms is not None:
                 # update obs rms
@@ -330,96 +337,115 @@ class SHAC:
             self.episode_length += 1
             rollout_len += 1
 
+            # NOTE: never verified that it works
+            # done = done.clone() | extra_info.get(
+            #     "contacts_changed", torch.zeros_like(done)
+            # )
+
             # for logging
             self.early_stops.append(term.cpu().numpy())
             self.episode_ends.append(trunc.cpu().numpy())
-            self.truncations.append(trunc.cpu().numpy())
+
+            if "jacobian" in info:
+                jac = info["jacobian"]  # shape NxSxA
+                self.jacobians.append(jac)
+                self.contact_changes.append(info["contacts_changed"].cpu().numpy())
+
+                # do horizon trunction
+                jac_norm = np.linalg.norm(jac, axis=(1, 2))
+                contact_trunc = jac_norm > self.contact_th
+                contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
+                # ensure that we're not truncating envs before the minimum step size
+                contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
+                # trunc = trunc | contact_trunc # NOTE: I don't think we need this anymore
+
+            # for logging
+            # self.truncations.append(trunc.cpu().numpy())
 
             # TODO why is next values computed at every step?
-            if self.critic_name == "CriticMLP":
-                next_values[i + 1] = self.target_critic(obs).squeeze(-1)
-            else:
-                act = torch.tanh(actions)
-                next_values[i + 1] = self.target_critic(obs, act).squeeze(-1)
+            real_obs = info["obs_before_reset"]
+            # sanity check
+            if (~torch.isfinite(real_obs)).sum() > 0:
+                print("Got inf obs")
+                raise ValueError
 
-            # handle truncated environments
-            trunc_env_ids = trunc.nonzero(as_tuple=False).squeeze(-1)
-            for id in trunc_env_ids:
-                # sanity check
-                if (
-                    torch.isnan(extra_info["obs_before_reset"][id]).sum() > 0
-                    or torch.isinf(extra_info["obs_before_reset"][id]).sum() > 0
-                    or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
-                ):
-                    print("Got inf obs")
-                    raise ValueError
+            if self.obs_rms is not None:
+                real_obs = obs_rms.normalize(real_obs)
 
-                if self.obs_rms is not None:
-                    real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
-                else:
-                    real_obs = extra_info["obs_before_reset"][id]
-
-                if self.critic_name == "CriticMLP":
-                    next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
-                else:
-                    a = torch.tanh(actions[id])
-                    next_values[i + 1, id] = self.target_critic(real_obs, a).squeeze(-1)
+            next_values = self.target_critic(real_obs).squeeze(-1)
 
             # handle terminated environments
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
             for id in term_env_ids:
-                next_values[i + 1, id] = 0.0
+                next_values[id] = 0.0
 
             # sanity check
-            if (next_values[i + 1] > 1e6).sum() > 0 or (
-                next_values[i + 1] < -1e6
-            ).sum() > 0:
+            if (next_values > 1e6).sum() > 0 or (next_values < -1e6).sum() > 0:
                 print("next value error")
                 raise ValueError
 
-            rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
+            # rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
+            rew_acc += self.gamma**rollout_len * rew
 
             # now merge truncation and termination into done
-            done = term | trunc
+            cutoff = rollout_len > self.steps_num
+            if "jacobian" in info:
+                cutoff = cutoff | contact_trunc
+            # print("terminated", term.nonzero().flatten().tolist())
+            # print("truncated", trunc.nonzero().flatten().tolist())
+            # print("cutoff", cutoff.nonzero().flatten().tolist())
+            done = term | trunc | cutoff
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            if i < self.steps_num - 1:
-                # first terminate all rollouts which are 'done'
-                actor_loss += (
-                    -rew_acc[i + 1, done_env_ids]
-                    - self.gamma
-                    * gamma[done_env_ids]
-                    * next_values[i + 1, done_env_ids]
-                ).sum()
-            else:
-                # terminate all envs because we reached the end of our rollout
-                actor_loss += (
-                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
-                ).sum()
+            # terminate all done environments
+            actor_loss -= (
+                rew_acc[done_env_ids]
+                + self.gamma ** rollout_len[done_env_ids] * next_values[done_env_ids]
+            ).sum()
+            actor_loss_terms += done.sum().item()
 
             # compute gamma for next step
-            gamma = gamma * self.gamma
+            # gamma = gamma * self.gamma
 
             # clear up gamma and rew_acc for done envs
-            gamma[done_env_ids] = 1.0
-            rew_acc[i + 1, done_env_ids] = 0.0
+            # gamma[done_env_ids] = 1.0
+            rew_acc[done_env_ids] = 0.0
             self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
+            # cut off gradients
+            # obs[done_env_ids] = obs[done_env_ids].clone()
+            # NOTE: The line below might actually be clearing all gradinets
+            # self.env.clear_grad_ids(done_env_ids)
+            # if len(done_env_ids) > 0:
+            self.env.clear_grad_ids(done_env_ids)
+            self.env.calculateObservations()
+
+            # get observations again since we need them detached
+            obs = self.env.obs_buf
+            if self.obs_rms is not None:
+                # update obs rms
+                with torch.no_grad():
+                    self.obs_rms.update(obs)
+                # normalize the current obs
+                obs = obs_rms.normalize(obs)
+            # self.last_done_ids = done_env_ids
+
             # collect data for critic training
             # TODO should behaviour before be the same for all of them?
-            with torch.no_grad():
-                self.rew_buf[i] = rew.clone()
-                if i < self.steps_num - 1:
-                    self.done_mask[i] = done.clone().to(torch.float32)
-                else:
-                    self.done_mask[i, :] = 1.0
-                self.next_values[i] = next_values[i + 1].clone()
+            # TODO need to update with new modifications
+            # with torch.no_grad():
+            #     self.rew_buf[i] = rew.clone()
+            #     if i < self.steps_num - 1:
+            #         self.done_mask[i] = done.clone().to(torch.float32)
+            #     else:
+            #         self.done_mask[i, :] = 1.0
+            #     self.next_values[i] = next_values[i + 1].clone()
 
             # collect episode loss
             with torch.no_grad():
-                self.episode_loss -= raw_rew
-                self.episode_discounted_loss -= self.episode_gamma * raw_rew
+                self.episode_loss -= rew
+                self.episode_discounted_loss -= self.episode_gamma * rew
                 self.episode_gamma *= self.gamma
                 if len(ep_done_env_ids) > 0:
                     self.episode_loss_meter.update(self.episode_loss[ep_done_env_ids])
@@ -429,9 +455,7 @@ class SHAC:
                     self.episode_length_meter.update(
                         self.episode_length[ep_done_env_ids]
                     )
-                    for k, v in filter(
-                        lambda x: x[0] in self.score_keys, extra_info.items()
-                    ):
+                    for k, v in filter(lambda x: x[0] in self.score_keys, info.items()):
                         self.episode_scores_meter_map[k + "_final"].update(
                             v[ep_done_env_ids]
                         )
@@ -457,17 +481,20 @@ class SHAC:
                         self.episode_length[ep_done_env_ids] = 0
                         self.episode_gamma[ep_done_env_ids] = 1.0
 
-        actor_loss /= self.steps_num * self.num_envs
+        self.avg_rollout_len.extend(rollout_len.tolist())
+        steps = np.sum(self.avg_rollout_len)
+        self.avg_rollout_len = np.mean(self.avg_rollout_len)
+        self.step_count += steps * self.num_envs
+
+        actor_loss /= steps * self.num_envs
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
 
-        self.actor_loss = actor_loss.detach().cpu().item()
+        self.actor_loss = actor_loss.detach().item()
 
-        self.step_count += self.steps_num * self.num_envs
-
-        self.avg_rollout_len.extend(rollout_len.tolist())
-        self.avg_rollout_len = np.mean(self.avg_rollout_len)
+        # save for next call to this function
+        self.last_obs = obs
 
         return actor_loss
 
@@ -572,7 +599,16 @@ class SHAC:
 
     def initialize_env(self):
         self.env.clear_grad()
-        self.env.reset()
+        obs = self.env.reset()
+
+        if self.obs_rms is not None:
+            # update obs rms
+            with torch.no_grad():
+                self.obs_rms.update(obs)
+            # normalize the current obs
+            obs = self.obs_rms.normalize(obs)
+
+        self.last_obs = obs
 
     @torch.no_grad()
     def run(self, num_games):
@@ -833,6 +869,15 @@ class SHAC:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
+
+            np.savez(
+                open(os.path.join(self.log_dir, "jacobians.npz"), "wb"),
+                jacobians=self.jacobians,
+                contact_changes=self.contact_changes,
+                truncations=self.truncations,
+                early_stops=self.early_stops,
+                episode_ends=self.episode_ends,
+            )
 
             print(
                 "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(

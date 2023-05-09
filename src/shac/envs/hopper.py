@@ -136,12 +136,12 @@ class HopperEnv(DFlexEnv):
                 density=1000.0,  # the way you calculate the mass of a body
                 stiffness=0.0,  # don't do anything
                 damping=2.0,  # don't do anything
-                contact_ke=2.0e4,  # the higher the more stiff; proportional to kd and kf
-                contact_kd=1.0e3,
-                contact_kf=1.0e3,
+                contact_ke=2e4,  # the higher the more stiff; proportional to kd and kf
+                contact_kd=1e3,
+                contact_kf=1e3,
                 contact_mu=0.9,
-                limit_ke=1.0e3,
-                limit_kd=1.0e1,
+                limit_ke=1e3,
+                limit_kd=1e1,
                 armature=1.0,  # TODO; loosely related to how tight the joints are stuck together; don't touch
                 radians=True,
                 load_stiffness=True,  # TODO
@@ -252,8 +252,8 @@ class HopperEnv(DFlexEnv):
         self.progress_buf += 1
         self.num_frames += 1
 
-        self.calculateObservations()
         self.calculateReward()
+        self.calculateObservations()
 
         # Reset environments if exseeded horizon
         # NOTE: this is truncation
@@ -273,7 +273,7 @@ class HopperEnv(DFlexEnv):
                 "contacts_changed": contacts_changed,
             }
 
-            if self.jacobians and not eval:
+            if self.jacobians:
                 self.extras.update({"jacobian": jac.cpu().numpy()})
 
         # reset all environments which have been terminated
@@ -356,11 +356,9 @@ class HopperEnv(DFlexEnv):
 
         return self.obs_buf
 
-    """
-    cut off the gradient from the current state to previous states
-    """
-
     def clear_grad(self, checkpoint=None):
+        """cut off the gradient from the current state to previous states"""
+
         with torch.no_grad():
             if checkpoint is None:
                 checkpoint = {}
@@ -369,13 +367,39 @@ class HopperEnv(DFlexEnv):
                 checkpoint["actions"] = self.actions.clone()
                 checkpoint["progress_buf"] = self.progress_buf.clone()
 
-            current_joint_q = checkpoint["joint_q"].clone()
-            current_joint_qd = checkpoint["joint_qd"].clone()
             self.state = self.model.state()
-            self.state.joint_q = current_joint_q
-            self.state.joint_qd = current_joint_qd
-            self.actions = checkpoint["actions"].clone()
-            self.progress_buf = checkpoint["progress_buf"].clone()
+            self.state.joint_q = checkpoint["joint_q"]
+            self.state.joint_qd = checkpoint["joint_qd"]
+            self.actions = checkpoint["actions"]
+            self.progress_buf = checkpoint["progress_buf"]
+
+    def clear_grad_ids(self, ids):
+        if len(ids) == 0:
+            return
+
+        # need to preserve theg grads of non-cut trajectories
+        # init_joint_q = self.state.joint_q.clone()
+        # init_joint_qd = self.state.joint_qd.clone()
+
+        # with torch.no_grad():
+        # clone the state to avoid gradient error
+        self.state = self.model.state()
+
+        # self.state.joint_q = init_joint_q
+        # self.state.joint_qd = init_joint_qd
+
+        with torch.no_grad():
+            self.state.joint_q.view(self.num_envs, -1)[ids] = self.state.joint_q.view(
+                self.num_envs, -1
+            )[ids].clone()
+            self.state.joint_qd.view(self.num_envs, -1)[ids] = self.state.joint_qd.view(
+                self.num_envs, -1
+            )[ids].clone()
+            # self.actions[ids] = self.actions[ids].clone()
+            self.progress_buf[ids] = self.progress_buf[ids].clone()
+
+        # recalculate observations
+        # self.calculateObservations()
 
     """
     This function starts collecting a new trajectory from the current states but cuts off the computation graph to the previous states.
