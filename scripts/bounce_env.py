@@ -329,6 +329,7 @@ class Bounce:
     ):
         losses = []
         trajectories = []
+        grad_norms = []
         with trange(iters) as t:
             for i in t:
                 tape = wp.Tape()
@@ -377,7 +378,13 @@ class Bounce:
                     losses.append(self.loss.numpy())
                     trajectories.append(self.trajectory())
 
-                    t.set_postfix(loss=self.l.numpy() / self.num_envs)
+                    grad_norm = np.linalg.norm(x_grad)
+                    grad_norms.append(grad_norm)
+
+                    t.set_postfix(
+                        loss=self.l.numpy()[0].round(4) / self.num_envs,
+                        grad_norm=grad_norm,
+                    )
 
                     # apply it to the initial state
                     x = x - x_grad * self.train_rate
@@ -399,7 +406,7 @@ class Bounce:
                 #         print("Early stopping at iter", i)
                 #         break
 
-            return np.array(losses), np.array(trajectories)
+            return np.array(losses), np.array(trajectories), np.array(grad_norms)
 
     def train_graph(self, iters, clip=False, norm=False, tol=1e-4):
         # capture forward/backward passes
