@@ -226,8 +226,8 @@ class HopperEnv(DFlexEnv):
         if self.jacobians:
             inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
             inputs.requires_grad_(True)
-            last_obs = inputs[:, :11]
-            act = inputs[:, 11:]
+            last_obs = inputs[:, : self.num_obs]
+            act = inputs[:, self.num_obs :]
             self.setStateAct(last_obs, act)
             output = self.integrator.forward(
                 self.model,
@@ -398,8 +398,8 @@ class HopperEnv(DFlexEnv):
             # self.actions[ids] = self.actions[ids].clone()
             self.progress_buf[ids] = self.progress_buf[ids].clone()
 
-        # recalculate observations
-        # self.calculateObservations()
+        # recalculate observations so that grads don't propgate wrongly
+        self.calculateObservations()
 
     """
     This function starts collecting a new trajectory from the current states but cuts off the computation graph to the previous states.

@@ -42,16 +42,28 @@ class CheetahEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=1,
         early_termination=False,
+        contact_termination=False,
+        jacobians=False,
     ):
         num_obs = 17
         num_act = 6
 
         super(CheetahEnv, self).__init__(
-            num_envs, num_obs, num_act, episode_length, MM_caching_frequency, seed, no_grad, render, device
+            num_envs,
+            num_obs,
+            num_act,
+            episode_length,
+            MM_caching_frequency,
+            seed,
+            no_grad,
+            render,
+            device,
         )
 
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
+        self.contact_termination = contact_termination
+        self.jacobians = jacobians
 
         self.init_sim()
 
@@ -62,7 +74,9 @@ class CheetahEnv(DFlexEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
-            self.stage = Usd.Stage.CreateNew("outputs/" + "Cheetah_" + str(self.num_envs) + ".usd")
+            self.stage = Usd.Stage.CreateNew(
+                "outputs/" + "Cheetah_" + str(self.num_envs) + ".usd"
+            )
 
             self.renderer = df.render.UsdRenderer(self.model, self.stage)
             self.renderer.draw_points = True
@@ -82,23 +96,27 @@ class CheetahEnv(DFlexEnv):
         self.num_joint_q = 9
         self.num_joint_qd = 9
 
-        self.x_unit_tensor = tu.to_torch([1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
-        self.y_unit_tensor = tu.to_torch([0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
-        self.z_unit_tensor = tu.to_torch([0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
+        self.x_unit_tensor = tu.to_torch(
+            [1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
+        self.y_unit_tensor = tu.to_torch(
+            [0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
+        self.z_unit_tensor = tu.to_torch(
+            [0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
 
-        self.start_rotation = torch.tensor([0.0], device=self.device, requires_grad=False)
+        self.start_rotation = torch.tensor(
+            [0.0], device=self.device, requires_grad=False
+        )
 
         # initialize some data used later on
         # todo - switch to z-up
         self.up_vec = self.y_unit_tensor.clone()
 
-        self.potentials = tu.to_torch([0.0], device=self.device, requires_grad=False).repeat(self.num_envs)
+        self.potentials = tu.to_torch(
+            [0.0], device=self.device, requires_grad=False
+        ).repeat(self.num_envs)
         self.prev_potentials = self.potentials.clone()
 
         self.start_pos = []
@@ -129,15 +147,20 @@ class CheetahEnv(DFlexEnv):
             )
 
             self.builder.joint_X_pj[link_start] = df.transform(
-                (0.0, 1.0, 0.0), df.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5)
+                (0.0, 1.0, 0.0),
+                df.quat_from_axis_angle((1.0, 0.0, 0.0), -math.pi * 0.5),
             )
 
             # base transform
             self.start_pos.append([0.0, start_height])
 
             # set joint targets to rest pose in mjcf
-            self.builder.joint_q[i * self.num_joint_q + 3 : i * self.num_joint_q + 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            self.builder.joint_target[i * self.num_joint_q + 3 : i * self.num_joint_q + 9] = [
+            self.builder.joint_q[
+                i * self.num_joint_q + 3 : i * self.num_joint_q + 9
+            ] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            self.builder.joint_target[
+                i * self.num_joint_q + 3 : i * self.num_joint_q + 9
+            ] = [
                 0.0,
                 0.0,
                 0.0,
@@ -148,12 +171,16 @@ class CheetahEnv(DFlexEnv):
 
         self.start_pos = tu.to_torch(self.start_pos, device=self.device)
         self.start_joint_q = tu.to_torch(self.start_joint_q, device=self.device)
-        self.start_joint_target = tu.to_torch(self.start_joint_target, device=self.device)
+        self.start_joint_target = tu.to_torch(
+            self.start_joint_target, device=self.device
+        )
 
         # finalize model
         self.model = self.builder.finalize(self.device)
         self.model.ground = self.ground
-        self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float32, device=self.device)
+        self.model.gravity = torch.tensor(
+            (0.0, -9.81, 0.0), dtype=torch.float32, device=self.device
+        )
 
         self.integrator = df.sim.SemiImplicitIntegrator()
 
@@ -180,41 +207,86 @@ class CheetahEnv(DFlexEnv):
         actions = actions.view((self.num_envs, self.num_actions))
 
         actions = torch.clip(actions, -1.0, 1.0)
-
+        unscaled_actions = actions * self.action_strength
         self.actions = actions.clone()
 
-        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = actions * self.action_strength
+        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = unscaled_actions
 
-        self.state = self.integrator.forward(
-            self.model, self.state, self.sim_dt, self.sim_substeps, self.MM_caching_frequency
+        next_state = self.integrator.forward(
+            self.model,
+            self.state,
+            self.sim_dt,
+            self.sim_substeps,
+            self.MM_caching_frequency,
         )
-        self.sim_time += self.sim_dt
 
-        self.reset_buf = torch.zeros_like(self.reset_buf)
+        # compute dynamics jacobians if requested
+        if self.jacobians:
+            inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
+            inputs.requires_grad_(True)
+            last_obs = inputs[:, : self.num_obs]
+            act = inputs[:, self.num_obs :]
+            self.setStateAct(last_obs, act)
+            output = self.integrator.forward(
+                self.model,
+                self.state,
+                self.sim_dt,
+                self.sim_substeps,
+                self.MM_caching_frequency,
+                False,
+            )
+            outputs = torch.cat(
+                [
+                    output.joint_q.view(self.num_envs, -1)[:, 1:],
+                    output.joint_qd.view(self.num_envs, -1),
+                ],
+                dim=-1,
+            )
+            jac = tu.jacobian2(outputs, inputs)
+
+        self.state = next_state
+        self.sim_time += self.sim_dt
 
         self.progress_buf += 1
         self.num_frames += 1
 
-        self.calculateObservations()
         self.calculateReward()
+        self.calculateObservations()
 
-        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        # Reset environments if exseeded horizon
+        # NOTE: this is truncation
+        truncation = self.progress_buf > self.episode_length - 1
+
+        # Reset environments if agent has ended in a bad state based on heuristics
+        # NOTE: this is termination
+        termination = torch.zeros_like(truncation)
 
         if self.no_grad == False:
             self.obs_buf_before_reset = self.obs_buf.clone()
-            self.extras = {"obs_before_reset": self.obs_buf_before_reset, "episode_end": self.termination_buf}
+            self.extras = {
+                "obs_before_reset": self.obs_buf_before_reset,
+                "episode_end": self.termination_buf,
+            }
 
+            if self.jacobians:
+                self.extras.update({"jacobian": jac.cpu().numpy()})
+
+        # reset all environments which have been terminated
+        self.reset_buf = termination | truncation
+        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
             self.reset(env_ids)
 
         self.render()
 
-        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
+        return self.obs_buf, self.rew_buf, termination, truncation, self.extras
 
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:
             if force_reset == True:
-                env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+                env_ids = torch.arange(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
 
         if env_ids is not None:
             # clone the state to avoid gradient error
@@ -222,26 +294,45 @@ class CheetahEnv(DFlexEnv):
             self.state.joint_qd = self.state.joint_qd.clone()
 
             # fixed start state
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = self.start_pos[env_ids, :].clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 2] = self.start_rotation.clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:] = self.start_joint_q.clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = self.start_pos[
+                env_ids, :
+            ].clone()
+            self.state.joint_q.view(self.num_envs, -1)[
+                env_ids, 2
+            ] = self.start_rotation.clone()
+            self.state.joint_q.view(self.num_envs, -1)[
+                env_ids, 3:
+            ] = self.start_joint_q.clone()
             self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.0
 
             # randomization
             if self.stochastic_init:
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] = (
                     self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2]
-                    + 0.1 * (torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5) * 2.0
+                    + 0.1
+                    * (torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5)
+                    * 2.0
                 )
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 2] = (
                     torch.rand(len(env_ids), device=self.device) - 0.5
                 ) * 0.2
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:] = (
                     self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:]
-                    + 0.1 * (torch.rand(size=(len(env_ids), self.num_joint_q - 3), device=self.device) - 0.5) * 2.0
+                    + 0.1
+                    * (
+                        torch.rand(
+                            size=(len(env_ids), self.num_joint_q - 3),
+                            device=self.device,
+                        )
+                        - 0.5
+                    )
+                    * 2.0
                 )
                 self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (
-                    torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5
+                    torch.rand(
+                        size=(len(env_ids), self.num_joint_qd), device=self.device
+                    )
+                    - 0.5
                 )
 
             # clear action
@@ -255,6 +346,13 @@ class CheetahEnv(DFlexEnv):
             self.calculateObservations()
 
         return self.obs_buf
+
+    def setStateAct(self, obs, act):
+        # self.state.joint_q.view(self.num_envs, -1)[:, 0:2] = TODO Don't need
+        # self.state = self.model.state(requires_grad=False)
+        self.state.joint_q.view(self.num_envs, -1)[:, 1:] = obs[:, :8]
+        self.state.joint_qd.view(self.num_envs, -1)[:, :] = obs[:, 8:]
+        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = act
 
     """
     cut off the gradient from the current state to previous states
@@ -299,15 +397,16 @@ class CheetahEnv(DFlexEnv):
 
     def calculateObservations(self):
         self.obs_buf = torch.cat(
-            [self.state.joint_q.view(self.num_envs, -1)[:, 1:], self.state.joint_qd.view(self.num_envs, -1)], dim=-1
+            [
+                self.state.joint_q.view(self.num_envs, -1)[:, 1:],
+                self.state.joint_qd.view(self.num_envs, -1),
+            ],
+            dim=-1,
         )
 
     def calculateReward(self):
         progress_reward = self.obs_buf[:, 8]
 
-        self.rew_buf = progress_reward + torch.sum(self.actions**2, dim=-1) * self.action_penalty
-
-        # reset agents
-        self.reset_buf = torch.where(
-            self.progress_buf > self.episode_length - 1, torch.ones_like(self.reset_buf), self.reset_buf
+        self.rew_buf = (
+            progress_reward + torch.sum(self.actions**2, dim=-1) * self.action_penalty
         )
