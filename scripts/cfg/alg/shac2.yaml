@@ -33,6 +33,7 @@ params:
     steps_num: ${resolve_default:32,${env.shac2.steps_num}}
     grad_norm: 1.0
     truncate_grads: True
+    contact_truncation: False
     save_interval: ${resolve_default:400,${env.shac2.save_interval}}
     early_stopping_patience: ${env.shac2.max_epochs}
     rew_scale: 1.0
@@ -40,7 +41,7 @@ params:
 
     player:
       determenistic: True
-      games_num: ${resolve_default:1,${env.games_num}}
+      games_num: ${resolve_default:1,${env.player.games_num}}
       num_actors: ${resolve_default:1,${env.player.num_actors}}
       print_stats: True
 

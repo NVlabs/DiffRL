@@ -6,19 +6,32 @@ entity: dmanip-rss
 metric:
   name: best_policy_loss/iter
   goal: minimize
+early_terminate:
+  type: hyperband
+  min_iter: 3
+
 parameters:
   alg:
     value: shac
   env:
     value: hopper
-  alg.params.config.grad_norm:
-    values: 1e-1, 5e-1, 1, 1e1
+  # alg.params.config.grad_norm:
+  #   values: [1e-1, 5e-1, 1, 1e1]
+  alg.params.config.truncate_grads:
+    value: False
+  alg.params.config.contact_truncation:
+    value: True
   alg.params.config.actor_learning_rate:
-    values: 1e-2, 1e-3, 2e-3, 1e-4, 3e-4
-  learning-rate:
+    # a flat log distribution from 1e-5 to 1e-1
     distribution: log_uniform
-    min: 1e-5
-    max: 1e-1 
+    min: -11.512925464970229
+    max: -2.3025850929940455
+    # values: [1e-3, 1e-4, 3e-4]
+  alg.params.config.critic_learning_rate:
+    # values: [1e-3, 1e-4, 3e-4]
+    distribution: log_uniform
+    min: -11.512925464970229
+    max: -2.3025850929940455
   general.seed:
     values: [0, 10, 20]
   general.run_wandb:
@@ -28,5 +41,4 @@ command:
   - ${interpreter}
   - ${program}
   - ${args_no_hyphens}
-  - "exp_name"
-  - "shac_grad_step_sweep"
+  - "exp_name=shac_grad_step_no_trunc_contact_trunc_sweep"

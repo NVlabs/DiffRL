@@ -21,8 +21,6 @@ from shac.utils.common import *
 from shac.utils.dataset import QCriticDataset
 from shac.utils.running_mean_std import RunningMeanStd
 from shac.utils.time_report import TimeReport
-from shac.models import actor as actor_models
-from shac.models import critic as critic_model
 import shac.utils.torch_utils as tu
 from tensorboardX import SummaryWriter
 import torch.distributed as dist
@@ -114,6 +112,8 @@ class SHAC:
 
         self.truncate_grad = cfg.alg.params.config.truncate_grads
         self.grad_norm = cfg.alg.params.config.grad_norm
+        self.contact_truncation = cfg.alg.params.config.contact_truncation
+        self.min_steps = 4
 
         if cfg.general.train:
             self.log_dir = cfg.general.logdir
@@ -234,9 +234,9 @@ class SHAC:
         rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
-        # next_values_model_free = torch.zeros(
-        #     (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
-        # )
+        next_values_model_free = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
         # actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
@@ -263,7 +263,6 @@ class SHAC:
             self.old_sigmas[:] = self.sigmas.clone()
 
         self.ep_kls = []
-        next_actions = torch.tanh(self.actor(obs, deterministic=deterministic))
 
         for i in range(self.steps_num):
             # collect data for critic training
@@ -271,7 +270,7 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             # normalized sampled action: pi(s)
-            actions = next_actions
+            actions = torch.tanh(self.actor(obs, deterministic=deterministic))
 
             with torch.no_grad():
                 self.act_buf[i] = actions.clone()
@@ -305,15 +304,19 @@ class SHAC:
 
             self.episode_length += 1
 
-            # done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
-            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+            trunc = extra_info.get("contact_changed", torch.zeros_like(done))
+            if self.contact_truncation:
+                is_done = done.clone() | trunc
+            else:
+                is_done = done.clone()
+            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
 
             next_actions = torch.tanh(self.actor(obs, deterministic=True))
             next_values[i + 1] = self.target_critic(obs, next_actions).squeeze(-1)
-            # next_values_model_free[i + 1] = self.target_critic(obs.detach(), next_actions.detach()).squeeze(-1)
+            next_values_model_free[i + 1] = self.target_critic(obs.detach(), next_actions).squeeze(-1)
             # next_values_model_free[i + 1] = torch.minimum(
-            #     self.critic(obs.requires_grad_(False), actions).squeeze(-1),
-            #     self.target_critic(obs.require_grad_(False), actions).squeeze(-1),
+            #     self.critic(obs.detach(), next_actions).squeeze(-1),
+            #     self.target_critic(obs.detach(), next_actions).squeeze(-1),
             # )
 
             # zero next_values for done envs with inf, nan, or >1e6 values in obs_before_reset
@@ -331,19 +334,18 @@ class SHAC:
                 zero_next_values, assign_next_values = done_env_ids[zero_next_values], done_env_ids[~zero_next_values]
                 if zero_next_values.shape[0] > 0:
                     next_values[i + 1, zero_next_values] = 0.0
-                    # next_values_model_free[i + 1, zero_next_values] = 0.0
+                    next_values_model_free[i + 1, zero_next_values] = 0.0
                 # use terminal value critic to estimate the long-term performance
                 if assign_next_values.shape[0] > 0:
                     if self.obs_rms is not None:
                         real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
-                        real_act = actions[assign_next_values]
                     else:
                         real_obs = extra_info["obs_before_reset"][assign_next_values]
-                        real_act = actions[assign_next_values]
+                    real_act = torch.tanh(self.actor(real_obs, deterministic=True))
                     next_values[i + 1, assign_next_values] = self.critic(real_obs, real_act).squeeze(-1)
-                    # next_values_model_free[i + 1, assign_next_values] = self.critic(
-                    #     real_obs.detach(), real_actions
-                    # ).squeeze(-1)
+                    next_values_model_free[i + 1, assign_next_values] = self.critic(
+                        real_obs.detach(), real_act
+                    ).squeeze(-1)
             if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
                 print("next value error")
                 if self.multi_gpu:
@@ -353,9 +355,11 @@ class SHAC:
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
             if i < self.steps_num - 1:
-                actor_loss += (
-                    -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
-                ).sum()
+                if self.rollout_len[done_env_ids] == self.min_steps:
+                    next_value = next_values_model_free[i + 1, done_env_ids]
+                else:
+                    next_value = next_values[i + 1, done_env_ids]
+                actor_loss += (-rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_value).sum()
                 # actor_model_free_loss += (
                 #     -rew_acc[i + 1, done_env_ids].detach()
                 #     - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
@@ -421,11 +425,19 @@ class SHAC:
             # actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().cpu().item()
-        # self.actor_model_free_loss = actor_loss.detach().cpu().item()
+        # self.actor_model_free_loss = actor_model_free_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
 
-        return actor_loss, None
+        rew_acc_ = rew_acc.detach().cpu().numpy()
+        rollout_lens = np.array([])
+        for j in range(rew_acc_.shape[1]):
+            idx = np.argwhere(rew_acc_[:, j] == 0.0)
+            idx = np.append(idx, len(rew_acc_) - 1)
+            rollout_lens = np.append(rollout_lens, np.diff(idx))
+        # rollout_lens is a 1D array of lenghts of each rollout
+        self.rollout_len = np.mean(rollout_lens)
+        return actor_loss
 
     @torch.no_grad()
     def evaluate_policy(self, num_games, deterministic=False):
@@ -560,6 +572,7 @@ class SHAC:
         self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
+        self.rollout_len = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
 
         def actor_closure():
@@ -571,7 +584,7 @@ class SHAC:
 
             # use autoscaling for mixed precision
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-                actor_loss, _ = self.compute_actor_loss()
+                actor_loss = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
@@ -782,6 +795,8 @@ class SHAC:
                 self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
                 self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
                 self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
+                self.writer.add_scalar("rollout_len/step", self.rollout_len, self.step_count)
+                self.writer.add_scalar("rollout_len/iter", self.rollout_len, self.iter_count)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
@@ -790,10 +805,11 @@ class SHAC:
             self.writer.flush()
 
             print(
-                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, rollout len {:.1f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
+                    self.rollout_len,
                     mean_episode_length,
                     self.steps_num * self.num_envs * self.rank_size / (time_end_epoch - time_start_epoch),
                     self.value_loss,

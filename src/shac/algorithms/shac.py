@@ -247,8 +247,9 @@ class SHAC:
                 self.obs_rms.update(obs)
             # normalize the current obs
             obs = obs_rms.normalize(obs)
+
+        # collect data for critic training
         for i in range(self.steps_num):
-            # collect data for critic training
             with torch.no_grad():
                 self.obs_buf[i] = obs.clone()
 
@@ -287,13 +288,14 @@ class SHAC:
             if not self.contact_truncation:
                 is_done = done.clone()
             else:
-                is_done = done.clone()
+                is_done = done.clone()  # | trunc
             done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
 
             if self.critic_name == "CriticMLP":
                 next_values[i + 1] = self.target_critic(obs).squeeze(-1)
             else:
-                next_values[i + 1] = self.target_critic(obs, torch.tanh(actions)).squeeze(-1)
+                next_action = torch.tanh(self.actor(obs, deterministic=True))
+                next_values[i + 1] = self.target_critic(obs, next_action).squeeze(-1)
 
             for id in done_env_ids:
                 if (
@@ -315,7 +317,7 @@ class SHAC:
                     if self.critic_name == "CriticMLP":
                         next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
                     else:
-                        real_act = torch.tanh(actions[id])
+                        real_act = torch.tanh(self.actor(real_obs, deterministic=True))
                         next_values[i + 1, id] = self.target_critic(real_obs, real_act).squeeze(-1)
 
             if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
@@ -338,6 +340,7 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
+            # done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             # collect data for critic training
             with torch.no_grad():
