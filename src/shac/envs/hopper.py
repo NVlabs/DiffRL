@@ -66,7 +66,7 @@ class HopperEnv(DFlexEnv):
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
         self.contact_ke = contact_ke
-        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 100.0
+        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 10.0
 
         self.init_sim()
 

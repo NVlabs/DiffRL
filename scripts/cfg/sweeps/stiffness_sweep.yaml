@@ -1,6 +1,6 @@
-name: shac_grad_step
+name: shac truncate contact, sweep ke, tuned
 program: train.py
-method: bayes
+method: grid
 project: shac
 entity: dmanip-rss
 metric:
@@ -18,7 +18,9 @@ parameters:
   alg.params.config.truncate_grads:
     value: False
   env.shac.actor_lr:
-    value: 1e-1
+    value: 4e-3
+  env.shac.critic_lr:
+    value: 1.2e-2
   general.seed:
     values: [0, 10, 20, 30, 40]
   general.run_wandb:
