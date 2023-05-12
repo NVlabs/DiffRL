@@ -42,6 +42,8 @@ class AntEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=1,
         early_termination=True,
+        contact_ke=4.0e4,
+        contact_kd=None,  #  1.0e4,
     ):
         num_obs = 37
         num_act = 8
@@ -52,6 +54,8 @@ class AntEnv(DFlexEnv):
 
         self.stochastic_init = stochastic_init
         self.early_termination = early_termination
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 4.0
 
         self.init_sim()
 
@@ -129,8 +133,8 @@ class AntEnv(DFlexEnv):
                 density=1000.0,
                 stiffness=0.0,
                 damping=1.0,
-                contact_ke=4.0e4,
-                contact_kd=1.0e4,
+                contact_ke=self.contact_ke,
+                contact_kd=self.contact_kd,
                 contact_kf=3.0e3,
                 contact_mu=0.75,
                 limit_ke=1.0e3,
@@ -206,9 +210,14 @@ class AntEnv(DFlexEnv):
 
         self.state.joint_act.view(self.num_envs, -1)[:, 6:] = actions * self.action_strength
 
-        self.state = self.integrator.forward(
+        next_state = self.integrator.forward(
             self.model, self.state, self.sim_dt, self.sim_substeps, self.MM_caching_frequency
         )
+
+        contact_changed = next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
+        self.state = next_state
+
         self.sim_time += self.sim_dt
 
         self.reset_buf = torch.zeros_like(self.reset_buf)
@@ -225,9 +234,7 @@ class AntEnv(DFlexEnv):
             self.obs_buf_before_reset = self.obs_buf.clone()
             self.extras = {"obs_before_reset": self.obs_buf_before_reset, "episode_end": self.termination_buf}
 
-        self.extras["contacts_changed"] = torch.tensor(
-            [self.model.contact_count - self.contact_count != 0] * self.num_envs, device=self.device
-        )
+        self.extras["contact_changed"] = contact_changed
 
         if len(env_ids) > 0:
             self.reset(env_ids)

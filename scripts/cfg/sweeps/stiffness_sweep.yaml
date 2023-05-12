@@ -13,10 +13,14 @@ parameters:
     value: hopper
   env.config.contact_ke:
     values: [1e2, 1e3, 1e4, 1e5]
-  env.config.contact_kd:
-    value: None
+  alg.params.config.contact_truncation:
+    value: True
+  alg.params.config.truncate_grads:
+    value: False
+  env.shac.actor_lr:
+    value: 1e-1
   general.seed:
-    values: [0, 10, 20]
+    values: [0, 10, 20, 30, 40]
   general.run_wandb:
     value: True
 command:
@@ -24,4 +28,4 @@ command:
   - ${interpreter}
   - ${program}
   - ${args_no_hyphens}
-  - "exp_name=shac_stiff_sweep"
+  - "exp_name=shac_stiff_contact_trunc_sweep"

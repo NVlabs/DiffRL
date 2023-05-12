@@ -46,7 +46,7 @@ class HopperEnv(DFlexEnv):
         MM_caching_frequency=16,
         early_termination=True,
         contact_ke=2.0e4,
-        contact_kd=1.0e3,
+        contact_kd=None,  #  1.0e3,
     ):
         num_obs = 11
         num_act = 3

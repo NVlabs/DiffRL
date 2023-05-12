@@ -16,7 +16,7 @@ config:
     
 shac:
   actor_lr: 2e-3
-  critic_lr: 2e-4
+  critic_lr: 4e-3
   max_epochs: 500
   betas:
     - 0.7
