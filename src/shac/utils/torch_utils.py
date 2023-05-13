@@ -11,6 +11,8 @@ import numpy as np
 import gc
 import torch
 import cProfile
+from torchviz import make_dot
+from time import sleep
 
 log_output = ""
 
@@ -264,19 +266,25 @@ def jacobian(f, input):
     return jacobians
 
 
-def jacobian2(output, input):
+def jacobian2(output, input, max_out_dim=None):
     """Computes the jacobian of function f with respect to the input"""
     num_envs, input_dim = input.shape
     output_dim = output.shape[1]
-    jacobians = torch.empty((num_envs, output_dim, input_dim), dtype=torch.float32)
+    if max_out_dim:
+        output_dim = min(output_dim, max_out_dim)
+    jacobians = torch.zeros((num_envs, output_dim, input_dim), dtype=torch.float32)
     for out_idx in range(output_dim):
-        select_index = torch.zeros(output_dim)
+        select_index = torch.zeros(output.shape[1])
         select_index[out_idx] = 1.0
         e = torch.tile(select_index, (num_envs, 1)).cuda()
         # retain = out_idx != output_dim - 1  # NOTE: experimental
-        (grad,) = torch.autograd.grad(
-            outputs=output, inputs=input, grad_outputs=e, retain_graph=True
-        )
-        jacobians[:, out_idx, :] = grad.view(num_envs, input_dim)
+        try:
+            (grad,) = torch.autograd.grad(
+                outputs=output, inputs=input, grad_outputs=e, retain_graph=True
+            )
+            jacobians[:, out_idx, :] = grad.view(num_envs, input_dim)
+        except RuntimeError as err:
+            print(f"WARN: Couldn't compute jacobian for {out_idx} index")
+            print(err)
 
     return jacobians

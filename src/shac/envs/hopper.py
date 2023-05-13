@@ -11,7 +11,6 @@ import sys
 
 import torch
 
-# from numpy.lib.function_base import angle
 from .dflex_env import DFlexEnv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -197,7 +196,7 @@ class HopperEnv(DFlexEnv):
 
                 self.num_frames -= render_interval
 
-    def step(self, actions):
+    def step(self, actions, play=False):
         actions = actions.view((self.num_envs, self.num_actions))
 
         actions = torch.clip(actions, -1.0, 1.0)
@@ -223,7 +222,7 @@ class HopperEnv(DFlexEnv):
         num_contacts = (body_f_s.abs() > 1e-1).any(dim=-1).any(dim=-1)
 
         # compute dynamics jacobians if requested
-        if self.jacobians:
+        if self.jacobians and not play:
             inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
             inputs.requires_grad_(True)
             last_obs = inputs[:, : self.num_obs]
@@ -273,7 +272,7 @@ class HopperEnv(DFlexEnv):
                 "contacts_changed": contacts_changed,
             }
 
-            if self.jacobians:
+            if self.jacobians and not play:
                 self.extras.update({"jacobian": jac.cpu().numpy()})
 
         # reset all environments which have been terminated
@@ -423,8 +422,7 @@ class HopperEnv(DFlexEnv):
 
     def setStateAct(self, obs, act):
         # self.state.joint_q.view(self.num_envs, -1)[:, 0:2] = TODO Don't need
-        self.state.joint_q.view(self.num_envs, -1)[:, 1] = obs[:, 0]
-        self.state.joint_q.view(self.num_envs, -1)[:, 2:] = obs[:, 1:5]
+        self.state.joint_q.view(self.num_envs, -1)[:, 1:] = obs[:, :5]
         self.state.joint_qd.view(self.num_envs, -1)[:, :] = obs[:, 5:]
         self.state.joint_act.view(self.num_envs, -1)[:, 3:] = act
 

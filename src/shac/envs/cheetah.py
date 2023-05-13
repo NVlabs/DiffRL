@@ -40,8 +40,8 @@ class CheetahEnv(DFlexEnv):
         episode_length=1000,
         no_grad=True,
         stochastic_init=False,
-        MM_caching_frequency=1,
-        early_termination=False,
+        MM_caching_frequency=16,
+        early_termination=True,
         contact_termination=False,
         jacobians=False,
     ):
@@ -69,7 +69,7 @@ class CheetahEnv(DFlexEnv):
 
         # other parameters
         self.action_strength = 200.0
-        self.action_penalty = -0.1
+        self.action_penalty = -1e-1
 
         # -----------------------
         # set up Usd renderer
@@ -114,11 +114,6 @@ class CheetahEnv(DFlexEnv):
         # todo - switch to z-up
         self.up_vec = self.y_unit_tensor.clone()
 
-        self.potentials = tu.to_torch(
-            [0.0], device=self.device, requires_grad=False
-        ).repeat(self.num_envs)
-        self.prev_potentials = self.potentials.clone()
-
         self.start_pos = []
         self.start_joint_q = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.start_joint_target = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -135,12 +130,12 @@ class CheetahEnv(DFlexEnv):
                 density=1000.0,
                 stiffness=0.0,
                 damping=1.0,
-                contact_ke=2.0e4,
-                contact_kd=1.0e3,
-                contact_kf=1.0e3,
+                contact_ke=2e4,
+                contact_kd=1e3,
+                contact_kf=1e3,
                 contact_mu=1.0,
-                limit_ke=1.0e3,
-                limit_kd=1.0e1,
+                limit_ke=1e3,
+                limit_kd=1e1,
                 armature=0.1,
                 radians=True,
                 load_stiffness=True,
@@ -203,7 +198,7 @@ class CheetahEnv(DFlexEnv):
 
                 self.num_frames -= render_interval
 
-    def step(self, actions):
+    def step(self, actions, play=False):
         actions = actions.view((self.num_envs, self.num_actions))
 
         actions = torch.clip(actions, -1.0, 1.0)
@@ -220,8 +215,16 @@ class CheetahEnv(DFlexEnv):
             self.MM_caching_frequency,
         )
 
+        # TODO this should be done conditionally
+        contacts_changed = next_state.body_f_s.clone().any(
+            dim=1
+        ) != self.state.body_f_s.clone().any(dim=1)
+        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
+        body_f_s = next_state.body_f_s.clone().view(self.num_envs, self.num_joint_q, -1)
+        num_contacts = (body_f_s.abs() > 1e-1).any(dim=-1).any(dim=-1)
+
         # compute dynamics jacobians if requested
-        if self.jacobians:
+        if self.jacobians and not play:
             inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
             inputs.requires_grad_(True)
             last_obs = inputs[:, : self.num_obs]
@@ -242,7 +245,8 @@ class CheetahEnv(DFlexEnv):
                 ],
                 dim=-1,
             )
-            jac = tu.jacobian2(outputs, inputs)
+            # TODO why are there no jacobians for indices 11..17 ?
+            jac = tu.jacobian2(outputs, inputs, max_out_dim=11)
 
         self.state = next_state
         self.sim_time += self.sim_dt
@@ -266,9 +270,10 @@ class CheetahEnv(DFlexEnv):
             self.extras = {
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
+                "contacts_changed": contacts_changed,
             }
 
-            if self.jacobians:
+            if self.jacobians and not play:
                 self.extras.update({"jacobian": jac.cpu().numpy()})
 
         # reset all environments which have been terminated
@@ -347,18 +352,9 @@ class CheetahEnv(DFlexEnv):
 
         return self.obs_buf
 
-    def setStateAct(self, obs, act):
-        # self.state.joint_q.view(self.num_envs, -1)[:, 0:2] = TODO Don't need
-        # self.state = self.model.state(requires_grad=False)
-        self.state.joint_q.view(self.num_envs, -1)[:, 1:] = obs[:, :8]
-        self.state.joint_qd.view(self.num_envs, -1)[:, :] = obs[:, 8:]
-        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = act
-
-    """
-    cut off the gradient from the current state to previous states
-    """
-
     def clear_grad(self, checkpoint=None):
+        """cut off the gradient from the current state to previous states"""
+
         with torch.no_grad():
             if checkpoint is None:
                 checkpoint = {}
@@ -367,13 +363,11 @@ class CheetahEnv(DFlexEnv):
                 checkpoint["actions"] = self.actions.clone()
                 checkpoint["progress_buf"] = self.progress_buf.clone()
 
-            current_joint_q = checkpoint["joint_q"].clone()
-            current_joint_qd = checkpoint["joint_qd"].clone()
             self.state = self.model.state()
-            self.state.joint_q = current_joint_q
-            self.state.joint_qd = current_joint_qd
-            self.actions = checkpoint["actions"].clone()
-            self.progress_buf = checkpoint["progress_buf"].clone()
+            self.state.joint_q = checkpoint["joint_q"]
+            self.state.joint_qd = checkpoint["joint_qd"]
+            self.actions = checkpoint["actions"]
+            self.progress_buf = checkpoint["progress_buf"]
 
     """
     This function starts collecting a new trajectory from the current states but cuts off the computation graph to the previous states.
@@ -394,6 +388,12 @@ class CheetahEnv(DFlexEnv):
         checkpoint["progress_buf"] = self.progress_buf.clone()
 
         return checkpoint
+
+    def setStateAct(self, obs, act):
+        # self.state.joint_q.view(self.num_envs, -1)[:, 0:2] = TODO Don't need
+        self.state.joint_q.view(self.num_envs, -1)[:, 1:] = obs[:, :8]
+        self.state.joint_qd.view(self.num_envs, -1)[:, :] = obs[:, 8:]
+        self.state.joint_act.view(self.num_envs, -1)[:, 3:] = act
 
     def calculateObservations(self):
         self.obs_buf = torch.cat(
