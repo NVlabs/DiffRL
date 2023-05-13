@@ -92,8 +92,6 @@ class AHAC:
         if cfg["params"]["config"].get("ret_rms", False):
             self.ret_rms = RunningMeanStd(shape=(), device=self.device)
 
-        self.rew_scale = cfg["params"]["config"].get("rew_scale", 1.0)
-
         self.critic_iterations = cfg["params"]["config"].get("critic_iterations", 16)
         self.num_batch = cfg["params"]["config"].get("num_batch", 4)
         self.batch_size = self.num_envs * self.steps_num // self.num_batch
@@ -134,23 +132,15 @@ class AHAC:
         self.actor_name = cfg["params"]["network"].get(
             "actor", "ActorStochasticMLP"
         )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
-        self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
         actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
         )
+        self.critic_name = "CriticMLP"  # NOTE: hardcoded for future proofness
         critic_fn = getattr(critic_models, self.critic_name)
-        if self.critic_name == "CriticMLP":
-            self.critic = critic_fn(
-                self.num_obs, cfg["params"]["network"], device=self.device
-            )
-        else:
-            self.critic = critic_fn(
-                self.num_obs,
-                self.num_actions,
-                cfg["params"]["network"],
-                device=self.device,
-            )
+        self.critic = critic_fn(
+            self.num_obs, cfg["params"]["network"], device=self.device
+        )
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
@@ -169,18 +159,19 @@ class AHAC:
             lr=self.critic_lr,
         )
 
+        self.rew_acc = torch.zeros(
+            (self.num_envs,), dtype=torch.float32, device=self.device
+        )
+        self.rew_acc = [
+            torch.tensor([0.0], dtype=torch.float32, device=self.device)
+        ] * self.num_envs
+
         # replay buffer
         self.obs_buf = torch.zeros(
             (self.steps_num, self.num_envs, self.num_obs),
             dtype=torch.float32,
             device=self.device,
         )
-        if self.critic_name == "QCriticMLP":
-            self.act_buf = torch.zeros(
-                (self.steps_num, self.num_envs, self.num_actions),
-                dtype=torch.float32,
-                device=self.device,
-            )
         self.rew_buf = torch.zeros(
             (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
         )
@@ -258,9 +249,6 @@ class AHAC:
         self.time_report = TimeReport()
 
     def compute_actor_loss(self, deterministic=False):
-        # TODO this reward accummulation needs to be carried over from the previous rollout
-        rew_acc = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
-
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
         actor_loss_terms = 0  # number of additions to actor_loss
 
@@ -284,13 +272,11 @@ class AHAC:
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
-        # TODO need to also transfer some stuff between rollouts
+        i = 0
         while actor_loss_terms < self.num_envs:
-            # TODO fix and add back
             # collect data for critic training
             # with torch.no_grad():
-            # self.obs_buf[i] = obs.clone()
-
+            #     self.obs_buf[i] = obs.clone()
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
 
@@ -357,7 +343,8 @@ class AHAC:
                 print("next value error")
                 raise ValueError
 
-            rew_acc += self.gamma**rollout_len * rew
+            for k in range(self.num_envs):
+                self.rew_acc[k] += self.gamma ** rollout_len[k] * rew[k]
 
             # now merge truncation and termination into done
             cutoff = rollout_len >= self.steps_num
@@ -368,18 +355,25 @@ class AHAC:
             # print("cutoff", cutoff.nonzero().flatten().tolist())
             done = term | trunc | cutoff
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+            not_done_env_ids = (~done).nonzero(as_tuple=False).squeeze(-1)
 
             # terminate all done environments
-            actor_loss -= (
-                rew_acc[done_env_ids]
-                + self.gamma ** rollout_len[done_env_ids] * next_values[done_env_ids]
-            ).sum()
+
+            # actor_loss -= (
+            #     self.rew_acc[done_env_ids]
+            #     + self.gamma ** rollout_len[done_env_ids] * next_values[done_env_ids]
+            # ).sum()
+            for k in done_env_ids:
+                actor_loss -= (
+                    self.rew_acc[k] + self.gamma ** rollout_len[k] * next_values[k]
+                ).sum()
 
             # keep count of number of loss terms we've added so far
             actor_loss_terms += done.sum().item()
 
-            # clear up buffers
-            rew_acc[done_env_ids] = 0.0
+            # clear up buffers; just a fancy way of preserving gradients
+            for k in done_env_ids:
+                self.rew_acc[k] = torch.zeros_like(self.rew_acc[k])
             self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
@@ -450,6 +444,11 @@ class AHAC:
         self.step_count += steps * self.num_envs
 
         actor_loss /= steps * self.num_envs
+
+        # self.rew_acc = self.rew_acc.detach()
+        with torch.no_grad():
+            r = torch.tensor(self.rew_acc).flatten()
+            print(r)
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
@@ -546,12 +545,7 @@ class AHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        if self.critic_name == "CriticMLP":
-            predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
-        else:
-            predicted_values = self.critic(
-                batch_sample["obs"], batch_sample["act"]
-            ).squeeze(-1)
+        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -620,7 +614,8 @@ class AHAC:
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
-            actor_loss.backward()
+            # need to retain the graph so that we can backprop through the reward
+            actor_loss.backward(retain_graph=True)
             self.time_report.end_timer("backward simulation")
 
             with torch.no_grad():
@@ -661,6 +656,9 @@ class AHAC:
             else:
                 lr = self.actor_lr
 
+            # clear buffers for critic
+            self.obs_buf = torch.zeros_like(self.obs_buf)
+
             # train actor
             self.time_report.start_timer("actor training")
             self.actor_optimizer.step(actor_closure).detach().item()
@@ -671,21 +669,12 @@ class AHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                if self.critic_name == "CriticMLP":
-                    dataset = CriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
-                else:
-                    dataset = QCriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.act_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
+                dataset = CriticDataset(
+                    self.batch_size,
+                    self.obs_buf,
+                    self.target_values,
+                    drop_last=False,
+                )
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")

@@ -238,7 +238,9 @@ class SHAC:
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
+        self.jacobians = []
         self.truncations = []
+        self.contact_changes = []
         self.early_stops = []
         self.episode_ends = []
 
@@ -334,6 +336,21 @@ class SHAC:
             self.early_stops.append(term.cpu().numpy())
             self.episode_ends.append(trunc.cpu().numpy())
             self.truncations.append(trunc.cpu().numpy())
+
+            if "jacobian" in extra_info:
+                jac = extra_info["jacobian"]  # shape NxSxA
+                self.jacobians.append(jac)
+                self.contact_changes.append(
+                    extra_info["contacts_changed"].cpu().numpy()
+                )
+
+                # do horizon trunction
+                jac_norm = np.linalg.norm(jac, axis=(1, 2))
+                contact_trunc = jac_norm > self.contact_th
+                contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
+                # ensure that we're not truncating envs before the minimum step size
+                contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
+                # trunc = trunc | contact_trunc # NOTE: I don't think we need this anymore
 
             # TODO why is next values computed at every step?
             if self.critic_name == "CriticMLP":
@@ -496,7 +513,7 @@ class SHAC:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions))
+            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions), play=True)
             done = term | trunc
 
             episode_length += 1
@@ -833,6 +850,15 @@ class SHAC:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
+
+            np.savez(
+                open(os.path.join(self.log_dir, "jacobians.npz"), "wb"),
+                jacobians=self.jacobians,
+                contact_changes=self.contact_changes,
+                truncations=self.truncations,
+                early_stops=self.early_stops,
+                episode_ends=self.episode_ends,
+            )
 
             print(
                 "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
