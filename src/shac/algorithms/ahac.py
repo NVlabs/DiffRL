@@ -129,9 +129,8 @@ class AHAC:
         self.eval_runs = cfg["params"]["config"]["player"]["games_num"]
 
         # create actor critic network
-        self.actor_name = cfg["params"]["network"].get(
-            "actor", "ActorStochasticMLP"
-        )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
+        # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
+        self.actor_name = cfg["params"]["network"].get("actor", "ActorStochasticMLP")
         actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
@@ -360,10 +359,8 @@ class AHAC:
             # print("cutoff", cutoff.nonzero().flatten().tolist())
             done = term | trunc | cutoff
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
-            not_done_env_ids = (~done).nonzero(as_tuple=False).squeeze(-1)
 
             # terminate all done environments
-
             # TODO vectorize somehow
             for k in done_env_ids:
                 actor_loss -= (
@@ -373,13 +370,14 @@ class AHAC:
             # keep count of number of loss terms we've added so far
             actor_loss_terms += done.sum().item()
 
-            # clear up buffers; just a fancy way of preserving gradients
+            # clear up buffers
             for k in done_env_ids:
                 self.rew_acc[k] = torch.zeros_like(self.rew_acc[k])
             rollout_lens.extend(self.rollout_len[done_env_ids].tolist())
             self.rollout_len[done_env_ids] = 0
 
             # cut off gradients of all done envs
+            # TODO do I still need this?
             self.env.clear_grad_ids(done_env_ids)
 
             # get observations again since we need them detached
@@ -438,9 +436,9 @@ class AHAC:
 
         steps = np.sum(rollout_lens)
         self.mean_horizon = np.mean(rollout_lens)
-        self.step_count += steps * self.num_envs
+        self.step_count += steps
 
-        actor_loss /= steps * self.num_envs
+        actor_loss /= steps
 
         # with torch.no_grad():
         # r = torch.tensor(self.rew_acc).flatten()
@@ -752,9 +750,7 @@ class AHAC:
             self.writer.add_scalar(
                 "rollout_len/step", self.mean_horizon, self.step_count
             )
-            self.writer.add_scalar(
-                "rollout_len/time", self.mean_horizon, time_elapse
-            )
+            self.writer.add_scalar("rollout_len/time", self.mean_horizon, time_elapse)
             self.writer.add_scalar("fps/iter", fps, self.iter_count)
             self.writer.add_scalar("fps/step", fps, self.step_count)
             self.writer.add_scalar("fps/time", fps, time_elapse)
@@ -858,13 +854,14 @@ class AHAC:
             )
 
             print(
-                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
                     self.max_epochs,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
                     self.mean_horizon,
+                    self.step_count,
                     fps,
                     self.value_loss,
                     self.grad_norm_before_clip,
