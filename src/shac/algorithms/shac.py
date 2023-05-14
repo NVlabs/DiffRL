@@ -131,26 +131,17 @@ class SHAC:
         self.eval_runs = cfg["params"]["config"]["player"]["games_num"]
 
         # create actor critic network
-        self.actor_name = cfg["params"]["network"].get(
-            "actor", "ActorStochasticMLP"
-        )  # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
+        # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
+        self.actor_name = cfg["params"]["network"].get("actor", "ActorStochasticMLP")
         self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
         actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
         )
         critic_fn = getattr(critic_models, self.critic_name)
-        if self.critic_name == "CriticMLP":
-            self.critic = critic_fn(
-                self.num_obs, cfg["params"]["network"], device=self.device
-            )
-        else:
-            self.critic = critic_fn(
-                self.num_obs,
-                self.num_actions,
-                cfg["params"]["network"],
-                device=self.device,
-            )
+        self.critic = critic_fn(
+            self.num_obs, cfg["params"]["network"], device=self.device
+        )
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
@@ -175,12 +166,6 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
-        if self.critic_name == "QCriticMLP":
-            self.act_buf = torch.zeros(
-                (self.steps_num, self.num_envs, self.num_actions),
-                dtype=torch.float32,
-                device=self.device,
-            )
         self.rew_buf = torch.zeros(
             (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
         )
@@ -294,11 +279,6 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             actions = self.actor(obs, deterministic=deterministic)
-
-            if self.critic_name == "QCriticMLP":
-                with torch.no_grad():
-                    self.act_buf[i] = actions.clone()
-
             obs, rew, term, trunc, extra_info = self.env.step(torch.tanh(actions))
 
             # sanity check; shouldn't get both trunc and term
@@ -353,11 +333,7 @@ class SHAC:
                 # trunc = trunc | contact_trunc # NOTE: I don't think we need this anymore
 
             # TODO why is next values computed at every step?
-            if self.critic_name == "CriticMLP":
-                next_values[i + 1] = self.target_critic(obs).squeeze(-1)
-            else:
-                act = torch.tanh(actions)
-                next_values[i + 1] = self.target_critic(obs, act).squeeze(-1)
+            next_values[i + 1] = self.target_critic(obs).squeeze(-1)
 
             # handle truncated environments
             trunc_env_ids = trunc.nonzero(as_tuple=False).squeeze(-1)
@@ -376,11 +352,7 @@ class SHAC:
                 else:
                     real_obs = extra_info["obs_before_reset"][id]
 
-                if self.critic_name == "CriticMLP":
-                    next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
-                else:
-                    a = torch.tanh(actions[id])
-                    next_values[i + 1, id] = self.target_critic(real_obs, a).squeeze(-1)
+                next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
 
             # handle terminated environments
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
@@ -576,15 +548,9 @@ class SHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        if self.critic_name == "CriticMLP":
-            predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
-        else:
-            predicted_values = self.critic(
-                batch_sample["obs"], batch_sample["act"]
-            ).squeeze(-1)
+        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
-
         return critic_loss
 
     def initialize_env(self):
@@ -694,21 +660,12 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                if self.critic_name == "CriticMLP":
-                    dataset = CriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
-                else:
-                    dataset = QCriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.act_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
+                dataset = CriticDataset(
+                    self.batch_size,
+                    self.obs_buf,
+                    self.target_values,
+                    drop_last=False,
+                )
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")
