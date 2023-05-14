@@ -272,7 +272,8 @@ class AHAC:
             # normalize the current obs
             obs = obs_rms.normalize(obs)
 
-        self.avg_rollout_len = []  # accumulates all lens in a rollout
+        # accumulates all rollout lengths after they have been cut
+        rollout_lens = []
 
         # Start short horizon rollout
         while actor_loss_terms < self.num_envs:
@@ -375,7 +376,7 @@ class AHAC:
             # clear up buffers; just a fancy way of preserving gradients
             for k in done_env_ids:
                 self.rew_acc[k] = torch.zeros_like(self.rew_acc[k])
-            self.avg_rollout_len.extend(self.rollout_len[done_env_ids].tolist())
+            rollout_lens.extend(self.rollout_len[done_env_ids].tolist())
             self.rollout_len[done_env_ids] = 0
 
             # cut off gradients of all done envs
@@ -435,8 +436,8 @@ class AHAC:
                         self.episode_length[ep_done_env_ids] = 0
                         self.episode_gamma[ep_done_env_ids] = 1.0
 
-        steps = np.sum(self.avg_rollout_len)
-        self.avg_rollout_len = np.mean(self.avg_rollout_len)
+        steps = np.sum(rollout_lens)
+        self.mean_horizon = np.mean(rollout_lens)
         self.step_count += steps * self.num_envs
 
         actor_loss /= steps * self.num_envs
@@ -736,6 +737,8 @@ class AHAC:
 
             time_end_epoch = time.time()
 
+            fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
+
             # logging
             time_elapse = time.time() - self.start_time
             self.writer.add_scalar("lr/iter", lr, self.iter_count)
@@ -744,11 +747,17 @@ class AHAC:
             self.writer.add_scalar("value_loss/step", self.value_loss, self.step_count)
             self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
             self.writer.add_scalar(
-                "rollout_len/step", self.avg_rollout_len, self.step_count
+                "rollout_len/iter", self.mean_horizon, self.iter_count
             )
             self.writer.add_scalar(
-                "rollout_len/iter", self.avg_rollout_len, self.iter_count
+                "rollout_len/step", self.mean_horizon, self.step_count
             )
+            self.writer.add_scalar(
+                "rollout_len/time", self.mean_horizon, time_elapse
+            )
+            self.writer.add_scalar("fps/iter", fps, self.iter_count)
+            self.writer.add_scalar("fps/step", fps, self.step_count)
+            self.writer.add_scalar("fps/time", fps, time_elapse)
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
@@ -855,10 +864,8 @@ class AHAC:
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.avg_rollout_len,
-                    self.steps_num
-                    * self.num_envs
-                    / (time_end_epoch - time_start_epoch),
+                    self.mean_horizon,
+                    fps,
                     self.value_loss,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,

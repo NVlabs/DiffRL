@@ -269,7 +269,9 @@ class SHAC:
             # normalize the current obs
             obs = obs_rms.normalize(obs)
 
-        self.avg_rollout_len = []  # accumulates all lens in a rollout
+        # accumulates all rollout lengths after they have been cut
+        rollout_lens = []
+        # keeps track of the current length of the rollout
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
@@ -392,7 +394,7 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
-            self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
+            rollout_lens.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
             # collect data for critic training
@@ -455,8 +457,8 @@ class SHAC:
 
         self.step_count += self.steps_num * self.num_envs
 
-        self.avg_rollout_len.extend(rollout_len.tolist())
-        self.avg_rollout_len = np.mean(self.avg_rollout_len)
+        rollout_lens.extend(rollout_len.tolist())
+        self.mean_horizon = np.mean(rollout_lens)
 
         return actor_loss
 
@@ -704,6 +706,7 @@ class SHAC:
             self.iter_count += 1
 
             time_end_epoch = time.time()
+            fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
 
             # logging
             time_elapse = time.time() - self.start_time
@@ -713,11 +716,15 @@ class SHAC:
             self.writer.add_scalar("value_loss/step", self.value_loss, self.step_count)
             self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
             self.writer.add_scalar(
-                "rollout_len/step", self.avg_rollout_len, self.step_count
+                "rollout_len/iter", self.mean_horizon, self.iter_count
             )
             self.writer.add_scalar(
-                "rollout_len/iter", self.avg_rollout_len, self.iter_count
+                "rollout_len/step", self.mean_horizon, self.step_count
             )
+            self.writer.add_scalar("rollout_len/time", self.mean_horizon, time_elapse)
+            self.writer.add_scalar("fps/iter", fps, self.iter_count)
+            self.writer.add_scalar("fps/step", fps, self.step_count)
+            self.writer.add_scalar("fps/time", fps, time_elapse)
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
@@ -824,10 +831,8 @@ class SHAC:
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.avg_rollout_len,
-                    self.steps_num
-                    * self.num_envs
-                    / (time_end_epoch - time_start_epoch),
+                    self.mean_horizon,
+                    fps,
                     self.value_loss,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,
