@@ -159,12 +159,16 @@ class AHAC:
             lr=self.critic_lr,
         )
 
-        self.rew_acc = torch.zeros(
-            (self.num_envs,), dtype=torch.float32, device=self.device
-        )
+        # accumulate rewards for each environment
+        # TODO make this vectorized somehow
         self.rew_acc = [
             torch.tensor([0.0], dtype=torch.float32, device=self.device)
         ] * self.num_envs
+
+        # keep check of rollout length per environment
+        self.rollout_len = torch.zeros(
+            (self.num_envs,), dtype=torch.int32, device=self.device
+        )
 
         # replay buffer
         self.obs_buf = torch.zeros(
@@ -269,14 +273,14 @@ class AHAC:
             obs = obs_rms.normalize(obs)
 
         self.avg_rollout_len = []  # accumulates all lens in a rollout
-        rollout_len = torch.zeros((self.num_envs,), device=self.device)
 
         # Start short horizon rollout
-        i = 0
         while actor_loss_terms < self.num_envs:
             # collect data for critic training
-            # with torch.no_grad():
-            #     self.obs_buf[i] = obs.clone()
+            with torch.no_grad():
+                self.obs_buf[self.rollout_len] = obs.clone()
+
+            # act in environment
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
 
@@ -300,7 +304,7 @@ class AHAC:
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
             self.episode_length += 1
-            rollout_len += 1
+            self.rollout_len += 1
 
             # for logging
             self.early_stops.append(term.cpu().numpy())
@@ -316,7 +320,7 @@ class AHAC:
                 contact_trunc = jac_norm > self.contact_th
                 contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
                 # ensure that we're not truncating envs before the minimum step size
-                contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
+                contact_trunc = contact_trunc & (self.rollout_len >= self.steps_min)
                 # trunc = trunc | contact_trunc # NOTE: I don't think we need this anymore
 
             # for logging
@@ -344,10 +348,10 @@ class AHAC:
                 raise ValueError
 
             for k in range(self.num_envs):
-                self.rew_acc[k] += self.gamma ** rollout_len[k] * rew[k]
+                self.rew_acc[k] += self.gamma ** self.rollout_len[k] * rew[k]
 
             # now merge truncation and termination into done
-            cutoff = rollout_len >= self.steps_num
+            cutoff = self.rollout_len >= self.steps_num
             if "jacobian" in info:
                 cutoff = cutoff | contact_trunc
             # print("terminated", term.nonzero().flatten().tolist())
@@ -359,13 +363,10 @@ class AHAC:
 
             # terminate all done environments
 
-            # actor_loss -= (
-            #     self.rew_acc[done_env_ids]
-            #     + self.gamma ** rollout_len[done_env_ids] * next_values[done_env_ids]
-            # ).sum()
+            # TODO vectorize somehow
             for k in done_env_ids:
                 actor_loss -= (
-                    self.rew_acc[k] + self.gamma ** rollout_len[k] * next_values[k]
+                    self.rew_acc[k] + self.gamma ** self.rollout_len[k] * next_values[k]
                 ).sum()
 
             # keep count of number of loss terms we've added so far
@@ -374,8 +375,8 @@ class AHAC:
             # clear up buffers; just a fancy way of preserving gradients
             for k in done_env_ids:
                 self.rew_acc[k] = torch.zeros_like(self.rew_acc[k])
-            self.avg_rollout_len.extend(rollout_len[done_env_ids].tolist())
-            rollout_len[done_env_ids] = 0
+            self.avg_rollout_len.extend(self.rollout_len[done_env_ids].tolist())
+            self.rollout_len[done_env_ids] = 0
 
             # cut off gradients of all done envs
             self.env.clear_grad_ids(done_env_ids)
@@ -390,15 +391,10 @@ class AHAC:
                 obs = obs_rms.normalize(obs)
 
             # collect data for critic training
-            # TODO should behaviour before be the same for all of them?
-            # TODO need to update with new modifications
-            # with torch.no_grad():
-            #     self.rew_buf[i] = rew.clone()
-            #     if i < self.steps_num - 1:
-            #         self.done_mask[i] = done.clone().to(torch.float32)
-            #     else:
-            #         self.done_mask[i, :] = 1.0
-            #     self.next_values[i] = next_values[i + 1].clone()
+            with torch.no_grad():
+                self.rew_buf[self.rollout_len] = rew.clone()
+                self.done_mask[self.rollout_len] = done.clone().to(torch.float32)
+                self.next_values[self.rollout_len] = next_values.clone()
 
             # collect episode loss
             with torch.no_grad():
@@ -445,10 +441,9 @@ class AHAC:
 
         actor_loss /= steps * self.num_envs
 
-        # self.rew_acc = self.rew_acc.detach()
-        with torch.no_grad():
-            r = torch.tensor(self.rew_acc).flatten()
-            print(r)
+        # with torch.no_grad():
+        # r = torch.tensor(self.rew_acc).flatten()
+        # print(r)
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
@@ -668,6 +663,20 @@ class AHAC:
             # prepare dataset
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
+                rew_backup = self.rew_buf.clone()
+                value_backup = self.next_values.clone()
+                obs_backup = self.obs_buf.clone()
+                # print(self.rollout_len)
+
+                # set all rewards and values that haven't been finished to 0
+                for n in range(self.num_envs):
+                    # TODO not sure if this would make the critic learn 0 values
+                    if self.rollout_len[n] != 0:
+                        self.rew_buf[-self.rollout_len[n] :, n] = 0.0
+                        self.next_values[-self.rollout_len[n] :, n] = 0.0
+                        self.obs_buf[-self.rollout_len[n] :, n, :] = torch.nan
+                        # NOTE: nans equal invalid data in the dataset below
+
                 self.compute_target_values()
                 dataset = CriticDataset(
                     self.batch_size,
@@ -675,6 +684,19 @@ class AHAC:
                     self.target_values,
                     drop_last=False,
                 )
+                # reset buffers correctly for next iteration
+                for n in range(self.num_envs):
+                    if self.rollout_len[n] != 0:
+                        self.rew_buf[: self.rollout_len[n], n] = rew_backup[
+                            -self.rollout_len[n] :, n
+                        ]
+                        self.next_values[: self.rollout_len[n], n] = value_backup[
+                            -self.rollout_len[n] :, n
+                        ]
+                        self.obs_buf[: self.rollout_len[n], n] = obs_backup[
+                            -self.rollout_len[n] :, n
+                        ]
+
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")

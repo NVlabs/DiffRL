@@ -267,7 +267,7 @@ def jacobian(f, input):
 
 
 def jacobian2(output, input, max_out_dim=None):
-    """Computes the jacobian of function f with respect to the input"""
+    """Computes the jacobian of output tensor with respect to the input"""
     num_envs, input_dim = input.shape
     output_dim = output.shape[1]
     if max_out_dim:

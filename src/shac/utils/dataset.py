@@ -15,6 +15,20 @@ class CriticDataset:
         self.target_values = target_values.view(-1)
         self.batch_size = batch_size
 
+        # filter nans
+        not_nan_idx = (self.obs == self.obs).all(dim=-1).nonzero(as_tuple=False)
+
+        # for debugging below
+        # print("detected {:} nans".format(len(self.obs) - len(not_nan_idx)))
+        # if len(self.obs) - len(not_nan_idx) > 0:
+        #     print(self.obs.shape)
+        #     print(not_nan_idx.shape)
+        #     print(not_nan_idx)
+        #     exit(1)
+
+        self.obs = self.obs[not_nan_idx]
+        self.target_values = self.target_values[not_nan_idx]
+
         if shuffle:
             self.shuffle()
 
@@ -41,7 +55,9 @@ class CriticDataset:
 
 
 class QCriticDataset:
-    def __init__(self, batch_size, obs, act, target_values, shuffle=False, drop_last=False):
+    def __init__(
+        self, batch_size, obs, act, target_values, shuffle=False, drop_last=False
+    ):
         self.obs = obs.view(-1, obs.shape[-1])
         self.act = act.view(-1, act.shape[-1])
         self.target_values = target_values.view(-1)
