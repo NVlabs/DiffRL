@@ -229,6 +229,7 @@ class AHAC:
             self.num_envs, dtype=torch.float32, device=self.device
         )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.done_buf = torch.zeros(self.num_envs, dtype=bool, device=self.device)
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
@@ -287,6 +288,8 @@ class AHAC:
             # episode is done because we have reset the environment
             ep_done = trunc | term
             ep_done_env_ids = ep_done.nonzero(as_tuple=False).squeeze(-1).cpu()
+
+            self.done_buf = self.done_buf | ep_done
 
             if self.obs_rms is not None:
                 # update obs rms
@@ -378,7 +381,7 @@ class AHAC:
 
             # cut off gradients of all done envs
             # TODO do I still need this?
-            self.env.clear_grad_ids(done_env_ids)
+            # self.env.clear_grad_ids(done_env_ids)
 
             # get observations again since we need them detached
             obs = self.env.obs_buf
@@ -435,9 +438,6 @@ class AHAC:
                         self.episode_gamma[ep_done_env_ids] = 1.0
 
         steps = np.sum(rollout_lens)
-        self.mean_horizon = np.mean(rollout_lens)
-        self.step_count += steps
-
         actor_loss /= steps
 
         # with torch.no_grad():
@@ -448,6 +448,25 @@ class AHAC:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().item()
+
+        self.step_count += steps
+
+        self.mean_horizon = np.mean(rollout_lens)
+
+        if torch.all(self.done_buf):
+            print("RESETTING ENVS")
+            # self.env.reset(force_reset=True)
+            # self.env.reset(torch.arange(0, self.num_envs))
+            self.env.initialize_trajectory()
+            self.done_buf = torch.zeros(
+                (self.num_envs,), dtype=bool, device=self.device
+            )
+
+            # technically reduces performance
+            # self.rew_acc = [
+            # torch.tensor([0.0], dtype=torch.float32, device=self.device)
+            # ] * self.num_envs
+            # self.rollout_len = torch.zeros_like(self.rollout_len)
 
         return actor_loss
 
@@ -476,7 +495,7 @@ class AHAC:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions))
+            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions), play=True)
             done = term | trunc
 
             episode_length += 1
@@ -547,14 +566,7 @@ class AHAC:
 
     def initialize_env(self):
         self.env.clear_grad()
-        obs = self.env.reset()
-
-        if self.obs_rms is not None:
-            # update obs rms
-            with torch.no_grad():
-                self.obs_rms.update(obs)
-            # normalize the current obs
-            obs = self.obs_rms.normalize(obs)
+        self.env.reset()
 
     @torch.no_grad()
     def run(self, num_games):
