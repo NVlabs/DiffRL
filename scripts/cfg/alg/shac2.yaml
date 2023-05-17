@@ -9,8 +9,23 @@ params:
           units: ${env.shac2.actor_mlp.units}
           activation: elu
 
+    # critic_name: double_q_network
+    # critic:
+    #   _target_: rl_games.algos_torch.network_builder.DoubleQCritic
+    #   units: ${env.shac2.critic_mlp.units}
+    #   activation: elu
+    #   norm_func_name: layer_norm
+    #   d2rl: True
+    # critic_name: q_network
+    # critic: 
+      # _target_: shac.models.critic.QCriticMLP
+      # cfg_network:
+      #   critic_mlp:
+      #     units: ${env.shac2.critic_mlp.units}
+      #     activation: elu
+    critic_name: value_network
     critic:
-      _target_: shac.models.critic.QCriticMLP
+      _target_: shac.models.critic.CriticMLP
       cfg_network:
         critic_mlp:
           units: ${env.shac2.critic_mlp.units}
