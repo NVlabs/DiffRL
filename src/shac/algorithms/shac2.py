@@ -36,7 +36,7 @@ class SHAC:
 
     def __init__(self, cfg: DictConfig):
         seeding(cfg.general.seed)
-        self.env = instantiate(cfg.env.config)
+        self.env = instantiate(cfg.task.env, _convert_='partial')
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
@@ -71,8 +71,8 @@ class SHAC:
 
         self.steps_num = cfg.alg.params.config.steps_num
         self.max_epochs = cfg.alg.params.config.max_epochs
-        self.actor_lr = float(cfg.env.shac2.actor_lr)
-        self.critic_lr = float(cfg.env.shac2.critic_lr)
+        self.actor_lr = float(cfg.task.shac2.actor_lr)
+        self.critic_lr = float(cfg.task.shac2.critic_lr)
         self.lr_schedule = cfg.alg.params.config.lr_schedule
 
         self.is_adaptive_lr = self.lr_schedule == "adaptive"

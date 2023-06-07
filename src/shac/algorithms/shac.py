@@ -46,7 +46,6 @@ class SHAC:
             seed=cfg["params"]["general"]["seed"],
             episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
             stochastic_init=stochastic_init,
-            no_grad=False,
         )
 
         config.update(cfg["params"].get("diff_env", {}))
@@ -216,7 +215,7 @@ class SHAC:
         self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.horizon_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
@@ -557,7 +556,7 @@ class SHAC:
         self.initialize_env()
         self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
 
         def actor_closure():
