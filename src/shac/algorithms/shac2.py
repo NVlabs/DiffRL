@@ -142,8 +142,7 @@ class SHAC:
         if self.critic_name == "q_network":
             self.critic = instantiate(
                 cfg.alg.params.network.critic,
-                obs_dim=self.num_obs,
-                action_dim=self.num_actions,
+                input_size=self.num_obs + self.num_actions,
                 device=self.device,
             )
         elif self.critic_name == "value_network":
@@ -152,7 +151,7 @@ class SHAC:
                 obs_dim=self.num_obs,
                 device=self.device,
             )
-        elif self.alg.params.critic_name == "double_q_network":
+        elif self.critic_name == "double_q_network":
             self.critic = instantiate(
                 cfg.alg.params.network.critic,
                 input_size=self.num_obs + self.num_actions,
@@ -161,7 +160,6 @@ class SHAC:
             ).to(self.device)
 
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
-        __import__("ipdb").set_trace()
         self.target_critic = copy.deepcopy(self.critic)
 
         # initialize optimizer
