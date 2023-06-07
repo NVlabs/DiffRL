@@ -2,7 +2,6 @@ defaults:
   - _self_
   - env: cartpole
   - alg: shac
-  # - override hydra/launcher: submitit_local
 
 
 hydra:
@@ -25,7 +24,7 @@ general:
   no_time_stamp: False
   render: False
   device: cuda:0
-  run_wandb: True
+  run_wandb: False
   seed: 42
   train: True
   checkpoint:
@@ -80,7 +79,25 @@ env:
       - 0.7
       - 0.95
 
-  shac2: ${.shac}
+  shac2:  
+    lambda: 0.95
+    actor_mlp:
+      units:
+        - 64
+        - 64
+    critic_mlp:
+      units:
+        - 64
+        - 64
+    target_critic_alpha: 0.4
+    actor_lr: 1e-3
+    critic_lr: 1e-3
+    max_epochs: 2000
+    save_interval: 400
+    steps_num: 32
+    betas: 
+      - 0.7
+      - 0.95
 
 wandb:
   project: shac

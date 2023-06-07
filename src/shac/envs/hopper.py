@@ -205,7 +205,9 @@ class HopperEnv(DFlexEnv):
             self.MM_caching_frequency,
         )
         contact_changed = next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        num_contact_changed = next_state.contact_changed.clone() - self.state.contact_changed.clone()
         contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
+        num_contact_changed = num_contact_changed.view(self.num_envs, -1).sum(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
 
@@ -227,6 +229,7 @@ class HopperEnv(DFlexEnv):
             }
 
         self.extras["contact_changed"] = contact_changed
+        self.extras["num_contact_changed"] = num_contact_changed
 
         if len(env_ids) > 0:
             self.reset(env_ids)
