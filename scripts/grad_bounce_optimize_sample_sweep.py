@@ -24,58 +24,35 @@ import warp.sim.render
 def main(config: DictConfig):
     np.random.seed(config.general.seed)
 
-    std = 1e-1
+    std = 0.5
     n = 2
     m = 2
     ndim = 30
-    N = 1024
+    N = 50
     H = 40
 
-    # iterate over different parametarisations
-    sweeps = [
-        {
-            "soft_contact_ke": 1e4,
-            "soft_contact_kf": 1e0,
-            "soft_contact_kd": 1e1,
-            "soft_contact_mu": 0.9,
-            "soft_contact_margin": 1e1,
-        },
-        {
-            "soft_contact_ke": 3e4,
-            "soft_contact_kf": 3e0,
-            "soft_contact_kd": 3e1,
-            "soft_contact_mu": 0.9,
-            "soft_contact_margin": 1e1,
-        },
-        {
-            "soft_contact_ke": 5e4,
-            "soft_contact_kf": 5e0,
-            "soft_contact_kd": 5e1,
-            "soft_contact_mu": 0.9,
-            "soft_contact_margin": 1e1,
-        },
-        {
-            "soft_contact_ke": 1e5,
-            "soft_contact_kf": 1e1,
-            "soft_contact_kd": 1e2,
-            "soft_contact_mu": 0.9,
-            "soft_contact_margin": 1e1,
-        },
-    ]
+    params = {
+        "soft_contact_ke": 5e4,
+        "soft_contact_kf": 5e0,
+        "soft_contact_kd": 5e1,
+        "soft_contact_mu": 0.9,
+        "soft_contact_margin": 1e1,
+    }
 
     results = []
 
     print("Collecting landscape")
-    for i, params in tqdm(enumerate(sweeps[:1])):
+    sweeps = [10, 20, 50, 100, 200, 500, 1000]
+    for i, N in tqdm(enumerate(sweeps)):
         print("Sweep {:}/{:}".format(i + 1, len(sweeps)))
 
         temp_N = ndim * ndim
-        env = Bounce(num_envs=temp_N, num_steps=H, std=0.0, render=True, **params)
+        env = Bounce(num_envs=temp_N, num_steps=H, std=0.0, **params)
 
         # plot landscape
         print("Collecting landscape")
-        xx = np.linspace(0, 15, ndim)
-        yy = np.linspace(-10, 5, ndim)
+        xx = np.linspace(5, 15, ndim)
+        yy = np.linspace(-10, 0, ndim)
         vels = []
         for i, x in enumerate(xx):
             for j, y in enumerate(yy):
@@ -83,30 +60,27 @@ def main(config: DictConfig):
         vels = np.array(vels)
         env.reset(start_vel=vels)
         landscape = env.compute_loss().numpy()
-        landscape_traj = env.trajectory()
-        env.render_iter(0)
 
         print("First-order optimisation")
         env = Bounce(num_envs=N, num_steps=H, std=std, **params)
-        losses, trajectories, _ = env.train(200)
+        losses, trajectories = env.train(300)
 
         print("Zero-order optimisation")
         env = Bounce(num_envs=N, num_steps=H, std=std, **params)
-        zero_losses, zero_trajectories, _ = env.train(500, zero_order=True)
+        zero_losses, zero_trajectories = env.train(1000, zero_order=True)
 
         result = {
             "landscape": landscape,
-            "landscape_trajectories": landscape_traj,
             "losses": losses,
             "trajectories": trajectories,
             "zero_losses": zero_losses,
             "zero_trajectories": zero_trajectories,
+            "N": N,
         }
-        result.update(params)
         results.append(result)
 
     # TODO make this saving more space efficient
-    np.save(f"landscapes_{std:.1f}", results)
+    np.save(f"landscapes_samples_{std:.1f}", results)
 
 
 if __name__ == "__main__":
