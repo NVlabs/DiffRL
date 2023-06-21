@@ -350,8 +350,7 @@ class AHAC:
                 print("next value error")
                 raise ValueError
 
-            for k in range(self.num_envs):
-                self.rew_acc[k] += self.gamma ** self.rollout_len[k] * rew[k]
+            self.rew_acc += self.gamma**self.rollout_len * rew
 
             # now merge truncation and termination into done
             cutoff = self.rollout_len >= self.steps_num
@@ -440,10 +439,6 @@ class AHAC:
         steps = np.sum(rollout_lens)
         actor_loss /= steps
 
-        # with torch.no_grad():
-        # r = torch.tensor(self.rew_acc).flatten()
-        # print(r)
-
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
 
@@ -454,7 +449,7 @@ class AHAC:
         self.mean_horizon = np.mean(rollout_lens)
 
         if torch.all(self.done_buf):
-            print("RESETTING ENVS")
+            print("RESETTING ALL ENVS")
             # self.env.reset(force_reset=True)
             # self.env.reset(torch.arange(0, self.num_envs))
             self.env.initialize_trajectory()
@@ -677,7 +672,6 @@ class AHAC:
                 rew_backup = self.rew_buf.clone()
                 value_backup = self.next_values.clone()
                 obs_backup = self.obs_buf.clone()
-                # print(self.rollout_len)
 
                 # set all rewards and values that haven't been finished to 0
                 for n in range(self.num_envs):
