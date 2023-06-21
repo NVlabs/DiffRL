@@ -382,10 +382,14 @@ class HopperEnv(DFlexEnv):
 
         # with torch.no_grad():
         # clone the state to avoid gradient error
-        self.state = self.model.state()
+        # self.state = self.model.state()
 
         # self.state.joint_q = init_joint_q
         # self.state.joint_qd = init_joint_qd
+
+        # clone the state to avoid gradient error
+        self.state.joint_q = self.state.joint_q.clone()
+        self.state.joint_qd = self.state.joint_qd.clone()
 
         with torch.no_grad():
             self.state.joint_q.view(self.num_envs, -1)[ids] = self.state.joint_q.view(

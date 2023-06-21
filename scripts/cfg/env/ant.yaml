@@ -3,12 +3,13 @@ config:
   _target_: shac.envs.AntEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 64
+  num_envs: ${resolve_default:512,${general.num_envs}}
   stochastic_init: True
   seed: ${general.seed}
   no_grad: ${general.play}
   episode_length: 1000
   MM_caching_frequency: 16
+  early_termination: True
 
 actor_mlp:
   units: [128, 64, 64]
