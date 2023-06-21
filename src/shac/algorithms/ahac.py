@@ -5,6 +5,15 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+# Adaptive Horizon Actor Critic (AHAC) is an alteration of SHAC. Instead
+# of rolling out all envs in parallel for a fixed horizon, this attempts
+# to rollout each env until it needs to be truncated. This can be viewed
+# as an asynchronus rollout scheme where the gradients flowing back from
+# each env are truncated independently from the others.
+
+# NOTE: Currently plagued with tech issues that don't let us do this efficiently.
+# Still sorting that out and possible might never happen :(
+
 import sys, os
 
 from torch.nn.utils.clip_grad import clip_grad_norm_
