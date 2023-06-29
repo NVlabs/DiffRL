@@ -5,9 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import hydra
-from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
+import os
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -20,9 +18,8 @@ import warp.sim
 import warp.sim.render
 
 
-@hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(config: DictConfig):
-    np.random.seed(config.general.seed)
+def main():
+    np.random.seed(0)
 
     std = 1e-1
     n = 2
@@ -105,8 +102,16 @@ def main(config: DictConfig):
         result.update(params)
         results.append(result)
 
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = f"landscapes_{std:.1f}"
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
+
     # TODO make this saving more space efficient
-    np.save(f"landscapes_{std:.1f}", results)
+    np.save(filename, results)
 
 
 if __name__ == "__main__":

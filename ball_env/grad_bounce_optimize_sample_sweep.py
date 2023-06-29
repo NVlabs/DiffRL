@@ -5,9 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import hydra
-from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
+import os
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -20,9 +18,8 @@ import warp.sim
 import warp.sim.render
 
 
-@hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(config: DictConfig):
-    np.random.seed(config.general.seed)
+def main():
+    np.random.seed(0)
 
     std = 0.5
     n = 2
@@ -63,24 +60,36 @@ def main(config: DictConfig):
 
         print("First-order optimisation")
         env = Bounce(num_envs=N, num_steps=H, std=std, **params)
-        losses, trajectories = env.train(300)
+        losses, trajectories, grad_norms = env.train(300)
 
         print("Zero-order optimisation")
         env = Bounce(num_envs=N, num_steps=H, std=std, **params)
-        zero_losses, zero_trajectories = env.train(1000, zero_order=True)
+        zero_losses, zero_trajectories, zero_norms = env.train(1000, zero_order=True)
 
         result = {
             "landscape": landscape,
             "losses": losses,
+            "grad_norms": grad_norms,
             "trajectories": trajectories,
             "zero_losses": zero_losses,
+            "zero_grad_norms": zero_norms,
             "zero_trajectories": zero_trajectories,
             "N": N,
+            "H": H,
+            "std": std,
         }
         results.append(result)
 
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = f"landscapes_samples_{std:.1f}"
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
+
     # TODO make this saving more space efficient
-    np.save(f"landscapes_samples_{std:.1f}", results)
+    np.save(filename, results)
 
 
 if __name__ == "__main__":

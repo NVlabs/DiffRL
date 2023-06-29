@@ -5,9 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import hydra
-from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
+import os
 import numpy as np
 from tqdm import tqdm
 
@@ -18,9 +16,8 @@ import warp.sim
 import warp.sim.render
 
 
-@hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(config: DictConfig):
-    np.random.seed(config.general.seed)
+def main():
+    np.random.seed(0)
 
     std = 1e-1
     n = 2
@@ -96,9 +93,7 @@ def main(config: DictConfig):
         baseline = []
 
         for h in tqdm(range(1, H + 1)):
-            env = Bounce(
-                ww, num_envs=N, num_steps=h, profile=False, render=False, **params
-            )
+            env = Bounce(N, h, profile=False, render=False, **params)
 
             param = env.states[0].particle_qd
 
@@ -136,8 +131,12 @@ def main(config: DictConfig):
 
     # env.render_iter(0)  # render last interation
 
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
     filename = "bounce_grads_{:}_sim_sweep".format(H, clip)
-    filename = f"outputs/grads/{filename}"
+    filename = f"{directory}/{filename}"
     print("Saving to", filename)
     np.save(filename, results)
 

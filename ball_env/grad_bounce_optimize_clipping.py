@@ -5,9 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import hydra
-from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
+import os
 import numpy as np
 from tqdm import tqdm
 
@@ -18,9 +16,8 @@ import warp.sim
 import warp.sim.render
 
 
-@hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(config: DictConfig):
-    np.random.seed(config.general.seed)
+def main():
+    np.random.seed(0)
 
     std = 1e-1
     n = 2
@@ -39,6 +36,14 @@ def main(config: DictConfig):
 
     env = Bounce(std=std, num_envs=N, num_steps=H, profile=False, render=False)
     losses_norm, trajectories_norm, norms_norm = env.train(200, norm=1.0)
+
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = "bounce_optimization_edge"
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
     np.savez(
         "bounce_optimization_edge.npz",
         z_losses=z_losses,

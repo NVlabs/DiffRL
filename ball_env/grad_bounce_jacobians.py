@@ -5,8 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import hydra
-from omegaconf import OmegaConf, DictConfig
+import os
 import numpy as np
 from tqdm import tqdm
 from bounce_env import Bounce
@@ -16,9 +15,8 @@ import warp.sim
 import warp.sim.render
 
 
-@hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
-def main(config: DictConfig):
-    np.random.seed(config.general.seed)
+def main():
+    np.random.seed(0)
 
     std = 1e-1
     n = 2
@@ -69,14 +67,20 @@ def main(config: DictConfig):
 
     jacs = np.array(jacs)
     print("Jacobian has shape", jacs.shape)
-    np.save("jacobians", jacs)
 
-    # save trajectory
-    print("Saving trajectory")
     xy = []
     for state in env.states:
         xy.append(state.particle_q.numpy())
-    np.save("xy", xy)
+
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = "jacobians"
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
+
+    np.savez(filename, xy=xy, jacobians=jacs, std=std, n=n, m=m, H=H)
 
 
 if __name__ == "__main__":

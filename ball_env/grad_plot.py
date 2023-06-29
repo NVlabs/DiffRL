@@ -23,7 +23,7 @@ def max_variance(arr: np.ndarray):
     )
 
 
-filename = "outputs/grads/bounce_grads_50.npz"
+filename = "outputs/bounce_grads_40.npz"
 print("Loading", filename)
 
 data = np.load(filename)
