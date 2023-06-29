@@ -17,7 +17,7 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env: Union[DFlexEnv, WarpEnv] = instantiate(config.env)
+    env: Union[DFlexEnv, WarpEnv] = instantiate(config.env.config)
 
     n = env.num_obs
     m = env.num_acts
@@ -103,7 +103,9 @@ def main(config: DictConfig):
         zobgs_no_grad.append(zobg_no_grad.detach().cpu().numpy())
 
     np.savez(
-        "{:}_grads_ms_{:}".format(env.__class__.__name__, config.env.episode_length),
+        "{:}_grads_ms_{:}".format(
+            env.__class__.__name__, config.env.config.episode_length
+        ),
         zobgs=zobgs,
         zobgs_no_grad=zobgs_no_grad,
         fobgs=fobgs,

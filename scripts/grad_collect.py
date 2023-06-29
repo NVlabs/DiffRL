@@ -14,7 +14,7 @@ def main(config: DictConfig):
     torch.random.manual_seed(config.general.seed)
 
     # create environment
-    env = instantiate(config.env)
+    env = instantiate(config.env.config)
 
     n = env.num_obs
     m = env.num_acts
@@ -31,14 +31,14 @@ def main(config: DictConfig):
     losses = []
     baseline = []
 
-    hh = np.arange(1, config.env.episode_length + 1, h_step)
+    hh = np.arange(1, config.env.config.episode_length + 1, h_step)
     for h in tqdm(hh):
         env.clear_grad()
         env.reset()
 
         ww = w.clone()
         ww.requires_grad_(True)
-        loss = torch.zeros(config.env.num_envs).to(device)
+        loss = torch.zeros(config.env.config.num_envs).to(device)
 
         # apply first noisy action
         obs, rew, done, info = env.step(ww)
@@ -65,8 +65,10 @@ def main(config: DictConfig):
         zobg = 1 / std**2 * (loss.unsqueeze(1) - loss[0]) * ww
         zobgs.append(zobg.detach().cpu().numpy())
 
-    filename = "{:}_grads_{:}".format(env.__class__.__name__, config.env.episode_length)
-    if "warp" in config.env._target_:
+    filename = "{:}_grads_{:}".format(
+        env.__class__.__name__, config.env.config.episode_length
+    )
+    if "warp" in config.env.config._target_:
         filename = "Warp" + filename
     filename = f"outputs/grads/{filename}"
     if hasattr(env, "start_state"):

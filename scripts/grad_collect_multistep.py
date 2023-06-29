@@ -7,7 +7,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torchviz import make_dot
-from shac.envs import DFlexEnv, WarpEnv
+from shac.envs import DFlexEnv
+from warp.envs import WarpEnv
 
 
 @hydra.main(version_base="1.2", config_path="cfg", config_name="config.yaml")
@@ -68,7 +69,7 @@ def main(config: DictConfig):
             (dpi,) = torch.autograd.grad(policy(obs.detach()).sum(), th)
             dpis.append(dpi)
             action = policy(obs) + w[t]
-            obs, rew, done, info = env.step(action)
+            obs, rew, term, trunc, info = env.step(action)
             loss += rew
             # NOTE: commented out code below is for the debugging of more efficient grad computation
             # make_dot(loss.sum(), show_attrs=True, show_saved=True).render("correct_graph")
@@ -107,9 +108,9 @@ def main(config: DictConfig):
 
     # Save data
     filename = "{:}_grads_ms_{:}".format(
-        env.__class__.__name__, config.env.episode_length
+        env.__class__.__name__, config.env.config.episode_length
     )
-    if "warp" in config.env._target_:
+    if "warp" in config.env.config._target_:
         filename = "Warp" + filename
     filename = f"outputs/grads/{filename}"
     if hasattr(env, "start_state"):

@@ -14,7 +14,7 @@ def main(config: DictConfig):
 
     torch.random.manual_seed(config.general.seed)
 
-    env = instantiate(config.env)
+    env = instantiate(config.env.config)
 
     n = env.num_obs
     m = env.num_acts
@@ -36,7 +36,7 @@ def main(config: DictConfig):
 
     ww = w.clone()
     ww.requires_grad_(True)
-    loss = torch.zeros(config.env.num_envs).to(device)
+    loss = torch.zeros(config.env.config.num_envs).to(device)
 
     # apply first noisy action
     obs, rew, done, info = env.step(ww)
@@ -62,9 +62,9 @@ def main(config: DictConfig):
         zobgs.append(zobg.detach().cpu().numpy())
 
     filename = "{:}_grads2_{:}".format(
-        env.__class__.__name__, config.env.episode_length
+        env.__class__.__name__, config.env.config.episode_length
     )
-    if "warp" in config.env._target_:
+    if "warp" in config.env.config._target_:
         filename = "Warp" + filename
     filename = f"outputs/grads/{filename}"
     if hasattr(env, "start_state"):
