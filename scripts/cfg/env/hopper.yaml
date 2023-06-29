@@ -1,0 +1,38 @@
+name: df_hopper
+env_name: HopperEnv
+
+config:
+  _target_: shac.envs.HopperEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 512 # ${resolve_default:512,${general.num_envs}}
+  seed: ${general.seed}
+  episode_length: 1000
+  no_grad: False
+  stochastic_init: True
+  MM_caching_frequency: 4
+  early_termination: True
+
+shac:
+  actor_lr: 1e-3
+  critic_lr: 1e-2
+  max_epochs: 2000
+  betas:
+    - 0.7
+    - 0.95
+  actor_mlp:
+    units:
+      - 128
+      - 128
+
+ppo:
+  max_epochs: 500
+  minibatch_size: 1920
+  save_interval: 100
+  save_best_after: 50
+  num_actors: 32
+  steps_num: 240
+
+player:
+  games_num: 12
+  num_actors: 4

@@ -96,3 +96,15 @@ python train_shac.py --cfg ./cfg/shac/ant.yaml --checkpoint ./logs/Ant/shac/poli
 ```
 
 The `--render` flag indicates whether to export the video of the task execution. If does, the exported video is encoded in `.usd` format, and stored in the `examples/output` folder. To visualize the exported `.usd` file, refer to [USD at NVIDIA](https://developer.nvidia.com/usd).
+
+To install Omniverse, follow the [Omniverse Install Page](https://www.nvidia.com/en-us/omniverse/download/)
+
+- Install [USD Composer](https://www.nvidia.com/en-us/omniverse/apps/create/)
+- Run Create using:
+```$ MESA_GL_VERSION_OVERRIDE=4.6 {OMNI_CREATE_PATH}/omni.create.singlegpu.sh``` where the `OMNI_CREATE_PATH` is `~/.local/share/ov/pkg/create-2022.2.2` updated to your version
+
+
+## Debugging
+
+If you're getting missing cuda libs while building dflex kernels, then do `ln -s $CONDA_PREFIX/lib $CONDA_PREFIX/lib64`
+ 

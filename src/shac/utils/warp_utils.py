@@ -30,12 +30,12 @@ def float_assign(a, b):
 
 @wp.kernel
 def assign_act_kernel(
-    b: wp.array2d(dtype=float),
+    b: wp.array(dtype=float),
     # outputs
     a: wp.array(dtype=float),
 ):
     tid = wp.tid()
-    a[2 * tid] = b[tid, 0]
+    a[2 * tid] = b[tid]
     a[2 * tid + 1] = 0.0
 
 
@@ -226,19 +226,15 @@ class IntegratorSimulate(torch.autograd.Function):
         ctx.body_q.requires_grad = True
         ctx.body_qd.requires_grad = True
 
-        ctx.model.shape_materials.ke.requires_grad = True
-        ctx.model.shape_materials.kd.requires_grad = True
-        ctx.model.shape_materials.kf.requires_grad = True
-        ctx.model.shape_materials.mu.requires_grad = True
-        ctx.model.shape_materials.restitution.requires_grad = True
-
         with ctx.tape:
             float_assign_joint_act(ctx.model.joint_act, ctx.act)
             # transform_assign(ctx.state_in.body_q, ctx.body_q)
             # spatial_assign(ctx.state_in.body_qd, ctx.body_qd)
             # eval_FK and eval_IK together break body integration due to small errors in
             # revolute joints, therefore DO NOT call in forward pass
-            # wp.sim.eval_fk(ctx.model, ctx.model.joint_q, ctx.model.joint_qd, None, state_in)
+            # wp.sim.eval_fk(
+            #     ctx.model, ctx.model.joint_q, ctx.model.joint_qd, None, state_in
+            # )
             for _ in range(substeps - 1):
                 state_in.clear_forces()
                 state_temp = model.state(requires_grad=True)
@@ -250,7 +246,6 @@ class IntegratorSimulate(torch.autograd.Function):
                     requires_grad=True,
                 )
                 state_in = state_temp
-            state_in.clear_forces()
             # updates joint_q joint_qd
             ctx.state_out = integrator.simulate(
                 ctx.model, state_in, state_out, dt / float(substeps), requires_grad=True
@@ -258,37 +253,37 @@ class IntegratorSimulate(torch.autograd.Function):
             # TODO: Check if calling collide after running substeps is correct
             if ctx.model.ground:
                 wp.sim.collide(ctx.model, ctx.state_out)
-            # wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
+            wp.sim.eval_ik(ctx.model, ctx.state_out, ctx.joint_q_end, ctx.joint_qd_end)
 
-            wp.launch(
-                kernel=get_joint_q,
-                dim=model.joint_count,
-                device=model.device,
-                inputs=[
-                    ctx.state_out.body_q,
-                    model.joint_type,
-                    model.joint_parent,
-                    model.joint_X_p,
-                    model.joint_axis,
-                    0.0,
-                ],
-                outputs=[ctx.joint_q_end],
-            )
-            wp.launch(
-                kernel=get_joint_qd,
-                dim=model.joint_count,
-                device=model.device,
-                inputs=[
-                    ctx.state_out.body_q,
-                    ctx.state_out.body_qd,
-                    model.joint_qd_start,
-                    model.joint_type,
-                    model.joint_parent,
-                    model.joint_X_p,
-                    model.joint_axis,
-                ],
-                outputs=[ctx.joint_qd_end],
-            )
+            # wp.launch(
+            #     kernel=get_joint_q,
+            #     dim=model.joint_count,
+            #     device=model.device,
+            #     inputs=[
+            #         ctx.state_out.body_q,
+            #         model.joint_type,
+            #         model.joint_parent,
+            #         model.joint_X_p,
+            #         model.joint_axis,
+            #         0.0,
+            #     ],
+            #     outputs=[ctx.joint_q_end],
+            # )
+            # wp.launch(
+            #     kernel=get_joint_qd,
+            #     dim=model.joint_count,
+            #     device=model.device,
+            #     inputs=[
+            #         ctx.state_out.body_q,
+            #         ctx.state_out.body_qd,
+            #         model.joint_qd_start,
+            #         model.joint_type,
+            #         model.joint_parent,
+            #         model.joint_X_p,
+            #         model.joint_axis,
+            #     ],
+            #     outputs=[ctx.joint_qd_end],
+            # )
         joint_q_end = wp.to_torch(ctx.joint_q_end)
         joint_qd_end = wp.to_torch(ctx.joint_qd_end)
         return (
@@ -299,7 +294,6 @@ class IntegratorSimulate(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, adj_joint_q, adj_joint_qd, _a):
-
         # map incoming Torch grads to our output variables
         ctx.joint_q_end.grad = wp.from_torch(adj_joint_q)
         ctx.joint_qd_end.grad = wp.from_torch(adj_joint_qd)
@@ -309,8 +303,8 @@ class IntegratorSimulate(torch.autograd.Function):
         # Unnecessary copying of grads, grads should already be recorded by context
         body_q_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_q]).clone()
         body_qd_grad = wp.to_torch(ctx.tape.gradients[ctx.state_in.body_qd]).clone()
-        ctx.body_q.grad = wp.from_torch(body_q_grad)
-        ctx.body_qd.grad = wp.from_torch(body_qd_grad)
+        # ctx.body_q.grad = wp.from_torch(body_q_grad)
+        # ctx.body_qd.grad = wp.from_torch(body_qd_grad)
 
         ctx.tape.zero()
         # return adjoint w.r.t. inputs

@@ -15,47 +15,50 @@ import yaml
 from gym import wrappers
 from shac import envs
 from shac.utils.common import *
-from dmanip.envs.claw_env import GoalType, ActionType, ObjectType
 
 
-# def create_dflex_env(**kwargs):
-#     env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
-#
-#     env = env_fn(
-#         num_envs=cfg_train["params"]["config"]["num_actors"],
-#         render=args.render,
-#         seed=args.seed,
-#         episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
-#         no_grad=True,
-#         stochastic_init=cfg_train["params"]["diff_env"]["stochastic_env"],
-#         MM_caching_frequency=cfg_train["params"]["diff_env"].get(
-#             "MM_caching_frequency", 1
-#         ),
-#     )
-#
-#     print("num_envs = ", env.num_envs)
-#     print("num_actions = ", env.num_actions)
-#     print("num_obs = ", env.num_obs)
-#
-#     frames = kwargs.pop("frames", 1)
-#     if frames > 1:
-#         env = wrappers.FrameStack(env, frames, False)
-#
-#     return env
-#
+def create_dflex_env(**kwargs):
+    env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
+
+    env = env_fn(
+        num_envs=cfg_train["params"]["config"]["num_actors"],
+        render=args.render,
+        seed=args.seed,
+        episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
+        no_grad=True,
+        stochastic_init=cfg_train["params"]["diff_env"]["stochastic_env"],
+        MM_caching_frequency=cfg_train["params"]["diff_env"].get(
+            "MM_caching_frequency", 1
+        ),
+    )
+
+    print("num_envs = ", env.num_envs)
+    print("num_actions = ", env.num_actions)
+    print("num_obs = ", env.num_obs)
+
+    frames = kwargs.pop("frames", 1)
+    if frames > 1:
+        env = wrappers.FrameStack(env, frames, False)
+
+    return env
 
 
 def parse_diff_env_kwargs(diff_env):
     env_kwargs = {}
     for key, value in diff_env.items():
-        if key in ["name", "episode_length", "stochastic_env"]:
+        if key in [
+            "name",
+            "episode_length",
+            "stochastic_env",
+            "num_envs",
+            "MM_caching_frequency",
+            "no_grad",
+            "render",
+            "seed",
+            "stochastic_init",
+        ]:
             continue
-        if key == "goal_type":
-            env_kwargs["goal_type"] = GoalType(value)
-        if key == "action_type":
-            env_kwargs["action_type"] = ActionType(value)
-        if key == "object_type":
-            env_kwargs["object_type"] = ObjectType(value)
+        env_kwargs[key] = value
     print("parsed kwargs:", env_kwargs)
     return env_kwargs
 
@@ -183,19 +186,19 @@ class RLGPUEnvAlgoObserver(AlgoObserver):
                 )
 
 
-# vecenv.register(
-#     "DFLEX",
-#     lambda config_name, num_actors, **kwargs: RLGPUEnv(
-#         config_name, num_actors, **kwargs
-#     ),
-# )
-# env_configurations.register(
-#     "dflex",
-#     {
-#         "env_creator": lambda **kwargs: create_dflex_env(**kwargs),
-#         "vecenv_type": "DFLEX",
-#     },
-# )
+vecenv.register(
+    "DFLEX",
+    lambda config_name, num_actors, **kwargs: RLGPUEnv(
+        config_name, num_actors, **kwargs
+    ),
+)
+env_configurations.register(
+    "dflex",
+    {
+        "env_creator": lambda **kwargs: create_dflex_env(**kwargs),
+        "vecenv_type": "DFLEX",
+    },
+)
 
 vecenv.register(
     "WARP",
@@ -320,7 +323,6 @@ def get_args():  # TODO: delve into the arguments
 
 
 if __name__ == "__main__":
-
     args = get_args()
 
     with open(args.cfg, "r") as f:

@@ -1,0 +1,43 @@
+name: shac
+params:
+  network:
+    actor: ActorStochasticMLP # ActorDeterministicMLP
+    actor_mlp:
+      units: ${env.shac.actor_mlp.units}
+      activation: elu
+
+    critic: CriticMLP
+    critic_mlp:
+      units: ${env.shac.critic_mlp.units}
+      activation: elu
+
+  config:
+    name: ${env.name}_shac
+    actor_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.actor_lr}} # adam
+    critic_learning_rate: 2e-3 # ${resolve_default:2e-3,${..env.critic_lr}} # adam
+    lr_schedule: linear # ('constant', 'linear')
+    target_critic_alpha: 0.2 # ${resolve_default:0.2,${..env.target_critic_alpha}}
+    obs_rms: True
+    ret_rms: False
+    critic_iterations: 16
+    critic_method: td-lambda # ('td-lambda', 'one-step')
+    lambda: 0.95
+    num_batch: 4
+    gamma: 0.99
+    betas:
+      - 0.7
+      - 0.95 # adam
+    max_epochs: ${env.shac.max_epochs}
+    steps_min: 8
+    steps_num: 32
+    grad_norm: 1.0
+    truncate_grads: True
+    num_actors: ${env.config.num_envs} # ${resolve_default:64,${..env.config.num_envs}}
+    save_interval: 400 # ${resolve_default:400,${..env.save_interval}}
+    contact_theshold: 150
+
+    player:
+      determenistic: True
+      games_num: ${env.player.games_num}
+      num_actors: ${env.player.num_actors}
+      print_stats: True

@@ -1,0 +1,26 @@
+params:
+  diff_env:
+    name: ClawWarpEnv
+    stochastic_env: True
+    episode_length: 250
+    goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
+    object_type: 8  # 0-3 are meshes, 4 - 8 are primitives
+    action_type: 0 # 0: position, 1: torque
+    rew_kw:
+      c_act: 0.
+      c_q: 10.
+      c_finger: 0.2
+
+
+  network:
+    actor: ActorStochasticMLP # ActorDeterministicMLP
+    actor_mlp:
+      units: [128, 64, 32]
+      activation: elu
+
+    critic: CriticMLP
+    critic_mlp:
+      units: [64, 64]
+      activation: elu
+
+
