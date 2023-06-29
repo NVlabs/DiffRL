@@ -89,7 +89,14 @@ def example_jac(args):
     print("took {:.2f}".format(total_time))
     print("jacobian shape", jac.shape)
 
-    # np.save("jac", jac.detach().cpu().numpy())
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = "jacs_{:}".format(args.env)
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
+    np.save(filename, jac.detach().cpu().numpy())
 
     for b in range(len(jac)):
         for i in range(jac.shape[1]):
@@ -157,7 +164,14 @@ def example_jac2(args):
     print("took {:.2f}".format(total_time))
     print("jacobian shape", jac.shape)
 
-    # np.save("jac", jac.detach().cpu().numpy())
+    directory = "outputs"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    filename = "jacs2_{:}".format(args.env)
+    filename = f"{directory}/{filename}"
+    print("Saving to", filename)
+    np.save(filename, jac.detach().cpu().numpy())
 
     for b in range(len(jac)):
         for i in range(jac.shape[1]):
@@ -238,7 +252,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="CartPoleSwingUpEnv")
+    parser.add_argument("--env", type=str, default="HopperEnv")
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--test", default=False, action="store_true")
 

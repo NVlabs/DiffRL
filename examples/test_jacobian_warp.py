@@ -4,6 +4,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+
+## BROKEN
+
 import sys, os
 
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -29,7 +32,7 @@ from torch.autograd.functional import jacobian
 from warp.envs import HopperEnv
 
 
-def test_jac(args, num_steps):
+def test_jac(args):
     seeding()
 
     # env_fn = getattr(envs, args.env)
@@ -128,7 +131,7 @@ def check_grad(fn, inputs, eps=1e-6, atol=1e-4, rtol=1e-6):
 
 
 def main(args):
-    test_jac(args, 1)
+    test_jac(args)
 
 
 if __name__ == "__main__":
