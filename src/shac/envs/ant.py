@@ -253,16 +253,7 @@ class AntEnv(DFlexEnv):
         )
         contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
         self.state = next_state
-
         self.sim_time += self.sim_dt
-
-        # TODO this should be done conditionally
-        contacts_changed = next_state.body_f_s.clone().any(
-            dim=1
-        ) != self.state.body_f_s.clone().any(dim=1)
-        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
-        # body_f_s = next_state.body_f_s.clone().view(self.num_envs, self.num_joint_q, -1)
-        # num_contacts = (body_f_s.abs() > 1e-1).any(dim=-1).any(dim=-1)
 
         # compute dynamics jacobians if requested
         if self.jacobians and not play:
@@ -308,13 +299,11 @@ class AntEnv(DFlexEnv):
             extras = {
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
-                "contacts_changed": contacts_changed,
+                "contact_changed": contact_changed,
             }
 
             if self.jacobians and not play:
                 extras.update({"jacobian": jac.cpu().numpy()})
-
-        self.extras["contact_changed"] = contact_changed
 
         # reset all environments which have been terminated
         self.reset_buf = termination | truncation
@@ -324,7 +313,7 @@ class AntEnv(DFlexEnv):
 
         self.render()
 
-        return self.obs_buf, self.rew_buf, termination, truncation, extras
+        return self.obs_buf, self.rew_buf, self.reset_buf, extras
 
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:
@@ -399,7 +388,7 @@ class AntEnv(DFlexEnv):
     def clear_grad(self, checkpoint=None):
         """cut off the gradient from the current state to previous states"""
         self.contact_count = self.model.contact_count
-        __import__("ipdb").set_trace()
+        # __import__("ipdb").set_trace()
         with torch.no_grad():
             if checkpoint is None:
                 checkpoint = {}

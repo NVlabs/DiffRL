@@ -1,20 +1,33 @@
 name: df_humanoid
-config:  
-  diff_env:
-    name: shac.envs.HumanoidEnv
-    render: ${general.render}
-    device: ${general.device}
-    num_envs: 64
-    stochastic_env: True
-    seed: ${general.seed}
-    episode_length: 1000
-    MM_caching_frequency: 48
+env_name: HumanoidEnv
 
-actor_mlp:
-  units: [256, 128]
-critic_mlp:
-  units: [256, 128]
+config:
+  _target_: shac.envs.HumanoidEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: ${resolve_default:64,${general.num_envs}}
+  no_grad: ${general.play}
+  stochastic_init: True
+  seed: ${general.seed}
+  episode_length: 1000
+  MM_caching_frequency: 48
 
-actor_lr: 2e-3
-critic_lr: 5e-4
-target_critic_alpha: 0.995
+shac:
+  actor_lr: 2e-3
+  critic_lr: 5e-4
+  target_critic_alpha: 0.995
+
+  actor_mlp:
+    units: [256, 128]
+  critic_mlp:
+    units: [256, 128]
+
+ppo:
+  max_epochs: 2000
+  minibatch_size: 8192
+  num_actors: 1024
+  steps_num: 32
+  actor_mlp:
+    units: [256, 128, 64]
+  critic_mlp:
+    units: [256, 128, 64]

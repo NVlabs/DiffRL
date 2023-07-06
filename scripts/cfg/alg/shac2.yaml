@@ -1,82 +1,42 @@
 name: shac2
 params:
   network:
-    actor: 
-      _target_: shac.models.actor.ActorStochasticMLP # ActorDeterministicMLP
-      device: ${general.device}
-      cfg_network:
-        actor_mlp:
-          units: ${env.shac2.actor_mlp.units}
-          activation: elu
+    actor: ActorStochasticMLP # ActorDeterministicMLP
+    actor_mlp:
+      units: ${env.shac.actor_mlp.units}
+      activation: elu
 
-    # critic_name: double_q_network
-    # critic:
-    #   _target_: rl_games.algos_torch.network_builder.DoubleQCritic
-    #   units: ${env.shac2.critic_mlp.units}
-    #   activation: elu
-    #   norm_func_name: layer_norm
-    #   d2rl: True
-    # critic_name: q_network
-    # critic: 
-      # _target_: shac.models.critic.QCriticMLP
-      # cfg_network:
-      #   critic_mlp:
-      #     units: ${env.shac2.critic_mlp.units}
-      #     activation: elu
-    critic_name: value_network
-    critic:
-      _target_: shac.models.critic.CriticMLP
-      cfg_network:
-        critic_mlp:
-          units: ${env.shac2.critic_mlp.units}
-          activation: elu
+    critic: CriticMLP
+    critic_mlp:
+      units: ${env.shac.critic_mlp.units}
+      activation: elu
 
   config:
     name: ${env.name}_${...name}
-    actor_optimizer: ${..default_actor_opt}
-    critic_optimizer: ${..default_critic_opt}
-    lr_schedule: linear # ['constant', 'linear', 'adaptive']
-    target_critic_alpha: ${resolve_default:0.4,${env.shac2.target_critic_alpha}}
+    actor_learning_rate: ${resolve_default:2e-3,${env.shac2.actor_lr}} # adam
+    critic_learning_rate: ${resolve_default:2e-3,${env.shac2.critic_lr}} # adam
+    lr_schedule: linear # ('constant', 'linear')
+    target_critic_alpha: ${resolve_default:0.2,${env.shac2.target_critic_alpha}}
     obs_rms: True
     ret_rms: False
     critic_iterations: 16
-    critic_method: td-lambda # ['td-lambda', 'one-step']
-    lam: ${env.shac2.lambda}
+    critic_method: td-lambda # ('td-lambda', 'one-step')
+    lamda: 0.95
     num_batch: 4
     gamma: 0.99
-    max_epochs: ${resolve_default:2000,${env.shac2.max_epochs}}
+    betas: [0.7, 0.95] # adam
+    max_epochs: ${env.shac2.max_epochs} # force user to define
     steps_num: ${resolve_default:32,${env.shac2.steps_num}}
     grad_norm: 1.0
     truncate_grads: True
-    contact_truncation: False
+    num_actors: ${env.config.num_envs} # ${resolve_default:64,${..env.config.num_envs}}
     save_interval: ${resolve_default:400,${env.shac2.save_interval}}
+    contact_truncation: False
     early_stopping_patience: ${env.shac2.max_epochs}
-    rew_scale: 1.0
     score_keys: []
 
     player:
       determenistic: True
-      games_num: ${resolve_default:1,${env.player.games_num}}
-      num_actors: ${resolve_default:1,${env.player.num_actors}}
+      games_num: ${resolve_default:12,${env.player.games_num}}
+      num_actors: ${resolve_default:12,${env.player.num_actors}}
       print_stats: True
-
-  default_actor_opt:
-    _target_: torch.optim.Adam
-    lr: ${env.shac2.actor_lr} # adam
-    betas: ${env.shac2.betas} # adam
-
-  default_critic_opt:
-    _target_: torch.optim.Adam
-    lr: ${env.shac2.critic_lr} # adam
-    betas: ${env.shac2.betas} # adam
-
-  default_adaptive_scheduler:
-    _target_: rl_games.common.schedulers.AdaptiveScheduler
-    kl_threshold : 0.01
-
-  default_linear_scheduler:
-    _target_: rl_games.common.schedulers.LinearScheduler
-    start_lr: ${..default_actor_opt.lr}
-    min_lr: 1e-5
-    max_steps: ${..config.max_epochs}
-    apply_to_entropy: False

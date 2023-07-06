@@ -9,7 +9,6 @@ config:
   no_grad: ${general.play}
   episode_length: 1000
   MM_caching_frequency: 16
-  steps_num: True
   early_termination: True
 
 shac:
@@ -25,3 +24,13 @@ shac:
   player:
     games_num: 1
     num_actors: 1
+
+ppo:
+  max_epochs: 5000
+  minibatch_size: 16384
+  num_actors: 2048
+  steps_num: 32
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [128, 64, 32]

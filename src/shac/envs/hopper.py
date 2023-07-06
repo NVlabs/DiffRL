@@ -145,11 +145,11 @@ class HopperEnv(DFlexEnv):
                 contact_kd=self.contact_kd,
                 contact_kf=1.0e3,
                 contact_mu=0.9,
-                limit_ke=1e3,
-                limit_kd=1e1,
-                armature=1.0,  # TODO; loosely related to how tight the joints are stuck together; don't touch
+                limit_ke=1.0e3,
+                limit_kd=1.0e1,
+                armature=1.0,
                 radians=True,
-                load_stiffness=True,  # TODO
+                load_stiffness=True,
             )
 
             self.builder.joint_X_pj[link_start] = df.transform(
@@ -276,14 +276,12 @@ class HopperEnv(DFlexEnv):
             self.extras = {
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
-                "contacts_changed": contacts_changed,
+                "contacts_changed": contact_changed,
+                "num_contact_changed": num_contact_changed,
             }
 
             if self.jacobians and not play:
                 self.extras.update({"jacobian": jac.cpu().numpy()})
-
-        self.extras["contact_changed"] = contact_changed
-        self.extras["num_contact_changed"] = num_contact_changed
 
         # reset all environments which have been terminated
         self.reset_buf = termination | truncation
@@ -293,7 +291,7 @@ class HopperEnv(DFlexEnv):
 
         self.render()
 
-        return self.obs_buf, self.rew_buf, termination, truncation, self.extras
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:

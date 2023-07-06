@@ -175,7 +175,24 @@ def train(cfg: DictConfig):
                 print(cfg_train["params"]["general"])
                 traj_optimizer = SHAC(cfg_train)
             elif cfg.alg.name == "shac2":
-                traj_optimizer = SHAC2(cfg)
+                cfg_train = cfg_full["alg"]
+                if cfg.general.play:
+                    cfg_train["params"]["config"]["num_actors"] = (
+                        cfg_train["params"]["config"]
+                        .get("player", {})
+                        .get("num_actors", 1)
+                    )
+                if not cfg.general.no_time_stamp:
+                    cfg.general.logdir = os.path.join(
+                        cfg.general.logdir, get_time_stamp()
+                    )
+
+                cfg_train["params"]["general"] = cfg_full["general"]
+                cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+                env_name = cfg_train["params"]["diff_env"].pop("_target_")
+                cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
+                print(cfg_train["params"]["general"])
+                traj_optimizer = SHAC2(cfg_train)
             if not cfg.general.play:
                 traj_optimizer.train()
             else:

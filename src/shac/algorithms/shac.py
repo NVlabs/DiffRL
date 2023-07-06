@@ -20,9 +20,9 @@ import yaml
 from shac import envs
 import shac.models.actor as actor_models
 import shac.models.critic as critic_models
+from shac.models.critic import CriticMLP
 from shac.utils.common import *
 import shac.utils.torch_utils as tu
-from rl_games.algos_torch.network_builder import DoubleQCritic
 from shac.utils.running_mean_std import RunningMeanStd
 from shac.utils.dataset import CriticDataset, QCriticDataset
 from shac.utils.time_report import TimeReport
@@ -68,13 +68,11 @@ class SHAC:
 
         self.gamma = cfg["params"]["config"].get("gamma", 0.99)
 
-        self.critic_method = cfg["params"]["config"]["critic_method"]
-        assert self.critic_method in ["one-step", "td-lambda"]
-        self.lam = cfg["params"]["config"].get("lambda", 0.95)
+        self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")
+        if self.critic_method == "td-lambda":
+            self.lam = cfg["params"]["config"].get("lambda", 0.95)
 
-        self.steps_min = cfg["params"]["config"].get("steps_min", 0)
         self.steps_num = cfg["params"]["config"]["steps_num"]
-        self.contact_th = cfg["params"]["config"].get("contact_theshold", 1e9)
         self.max_epochs = cfg["params"]["config"]["max_epochs"]
         self.actor_lr = float(cfg["params"]["config"]["actor_learning_rate"])
         self.critic_lr = float(cfg["params"]["config"]["critic_learning_rate"])
@@ -92,6 +90,8 @@ class SHAC:
         if cfg["params"]["config"].get("ret_rms", False):
             self.ret_rms = RunningMeanStd(shape=(), device=self.device)
 
+        self.rew_scale = cfg["params"]["config"].get("rew_scale", 1.0)
+
         self.critic_iterations = cfg["params"]["config"].get("critic_iterations", 16)
         self.num_batch = cfg["params"]["config"].get("num_batch", 4)
         self.batch_size = self.num_envs * self.steps_num // self.num_batch
@@ -99,12 +99,6 @@ class SHAC:
 
         self.truncate_grad = cfg["params"]["config"]["truncate_grads"]
         self.grad_norm = cfg["params"]["config"]["grad_norm"]
-        self.contact_truncation = cfg["params"]["config"].get(
-            "contact_truncation", False
-        )
-        self.min_steps_from_truncation = cfg["params"]["config"].get(
-            "min_steps_before_truncation", 4
-        )
 
         if cfg["params"]["general"]["train"]:
             self.log_dir = cfg["params"]["general"]["logdir"]
@@ -132,23 +126,15 @@ class SHAC:
             )
             self.steps_num = self.env.episode_length
 
-        self.eval_runs = cfg["params"]["config"]["player"]["games_num"]
-
         # create actor critic network
-        # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
         self.actor_name = cfg["params"]["network"].get("actor", "ActorStochasticMLP")
+        assert self.actor_name in ["ActorDeterministicMLP", "ActorStochasticMLP"]
         actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
         )
-        self.critic_name = "CriticMLP"  # NOTE: hardcoded for future proofness
-        critic_fn = getattr(critic_models, self.critic_name)
-        if self.critic_name == "CriticMLP":
-            input_size = self.num_obs
-        elif self.critic_name == "QCriticMLP" or self.critic_name == "DoubleQCriticMLP":
-            input_size = self.num_obs + self.num_actions
-        self.critic = critic_fn(
-            input_size, cfg["params"]["network"], device=self.device
+        self.critic = CriticMLP(
+            self.num_obs, cfg["params"]["network"], device=self.device
         )
 
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
@@ -175,18 +161,6 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
-        if self.critic_name.endswith("QCriticMLP"):
-            self.act_buf = torch.zeros(
-                (self.steps_num, self.num_envs, self.num_actions),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            # self.next_obs_buf = torch.zeros(
-            #     (self.steps_num, self.num_envs, self.num_obs),
-            #     dtype=torch.float32,
-            #     device=self.device,
-            # )
-
         self.rew_buf = torch.zeros(
             (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
         )
@@ -245,11 +219,6 @@ class SHAC:
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
-        self.jacobians = []
-        self.truncations = []
-        self.contact_changes = []
-        self.early_stops = []
-        self.episode_ends = []
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -262,20 +231,10 @@ class SHAC:
             for key in self.score_keys
         }
 
+        self.eval_runs = cfg["params"]["config"]["player"].get("games_num", 12)
+
         # timer
         self.time_report = TimeReport()
-
-    def compute_values(self, obs):
-        """Compute values for the given observations with target critic."""
-        if self.critic_name == "CriticMLP":
-            values = self.target_critic(obs).squeeze(-1)
-        elif self.critic_name == "QCriticMLP":
-            action = torch.tanh(self.actor(obs, deterministic=True))
-            values = self.target_critic(obs, action).squeeze(-1)
-        elif self.critic_name == "DoubleQCriticMLP":
-            action = torch.tanh(self.actor(obs, deterministic=True))
-            values = torch.minimum(*self.target_critic(obs, action)).squeeze(-1)
-        return values
 
     def compute_actor_loss(self, deterministic=False):
         rew_acc = torch.zeros(
@@ -296,33 +255,27 @@ class SHAC:
                 ret_var = self.ret_rms.var.clone()
 
         # initialize trajectory to cut off gradients between episodes.
-        next_obs = self.env.initialize_trajectory()
+        obs = self.env.initialize_trajectory()
         if self.obs_rms is not None:
             # update obs rms
             with torch.no_grad():
-                self.obs_rms.update(next_obs)
+                self.obs_rms.update(obs)
             # normalize the current obs
-            next_obs = obs_rms.normalize(next_obs)
+            obs = obs_rms.normalize(obs)
 
-        # collect data for critic training
+        # accumulates all rollout lengths after they have been cut
+        rollout_lens = []
+        # keeps track of the current length of the rollout
+        rollout_len = torch.zeros((self.num_envs,), device=self.device)
+        # Start short horizon rollout
         for i in range(self.steps_num):
-            obs = next_obs
+            # collect data for critic training
             with torch.no_grad():
                 self.obs_buf[i] = obs.clone()
 
             # act in environment
             actions = self.actor(obs, deterministic=deterministic)
-            obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
-
-            if self.critic_name.endswith("QCriticMLP"):
-                with torch.no_grad():
-                    self.act_buf[i] = actions.clone()
-
-            next_obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
-
-            # if self.critic_name.endswith("QCriticMLP"):
-            #     with torch.no_grad():
-            #         self.next_obs_buf[i] = obs.clone()
+            obs, rew, done, info = self.env.step(torch.tanh(actions))
 
             with torch.no_grad():
                 raw_rew = rew.clone()
@@ -333,9 +286,9 @@ class SHAC:
             if self.obs_rms is not None:
                 # update obs rms
                 with torch.no_grad():
-                    self.obs_rms.update(next_obs)
+                    self.obs_rms.update(obs)
                 # normalize the current obs
-                next_obs = obs_rms.normalize(next_obs)
+                obs = obs_rms.normalize(obs)
 
             if self.ret_rms is not None:
                 # update ret rms
@@ -348,64 +301,20 @@ class SHAC:
             self.episode_length += 1
             rollout_len += 1
 
-            trunc = extra_info.get("contact_changed", torch.zeros_like(done))
-            trunc_on_contact = (
-                extra_info.get("num_contact_changed", torch.zeros_like(done)) >= 1
-            )
-            if self.contact_truncation:
-                is_done = done.clone() | trunc_on_contact
-                trunc_env_ids = trunc_on_contact.nonzero(as_tuple=False).squeeze(-1)
-            else:
-                is_done = done.clone()
-                trunc_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
-            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
-
-            next_values[i + 1] = self.compute_values(next_obs)
-
-            for id in done_env_ids:
-                if (
-                    torch.isnan(extra_info["obs_before_reset"][id]).sum() > 0
-                    or torch.isinf(extra_info["obs_before_reset"][id]).sum() > 0
-                    or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
-                ):  # ugly fix for nan values
-                    next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length:
-                    # set values to 0 due to early termination
-                    next_values[i + 1, id] = 0.0
-                else:
-                    # otherwise, use terminal value critic to estimate the long-term performance
-                    if self.obs_rms is not None:
-                        real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
-                    else:
-                        real_obs = extra_info["obs_before_reset"][id]
-                    # if truncating on contact, compute model-free value
-                    # and at least min_steps have passed since last truncation/short horizon
-                    last_zero = (
-                        self.rew_buf[:i, id].eq(0).nonzero(as_tuple=False).squeeze(-1)
-                    )
-                    if len(last_zero) == 0:
-                        last_zero = i
-                    else:
-                        last_zero = last_zero[-1]
-
-                    if (
-                        self.contact_truncation
-                        and id in trunc_env_ids
-                        and i - last_zero >= self.min_steps_from_truncation
-                    ):
-                        real_obs = real_obs.detach()
-
-                    next_values[i + 1, id] = self.compute_values(real_obs)
-
-            is_done = done.clone()
-            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
+            real_obs = info["obs_before_reset"]
+            # sanity check
+            if (~torch.isfinite(real_obs)).sum() > 0:
+                print("Got inf obs")
+                raise ValueError
 
             if self.obs_rms is not None:
                 real_obs = obs_rms.normalize(real_obs)
 
             next_values[i + 1] = self.target_critic(real_obs).squeeze(-1)
 
-            # handle terminated environments
+            # handle terminated environments which stopped for some bad reason
+            # since the reason is bad we set their value to 0
+            term = done & (self.episode_length < self.max_episode_length)
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
             for id in term_env_ids:
                 next_values[i + 1, id] = 0.0
@@ -419,8 +328,6 @@ class SHAC:
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
-            # now merge truncation and termination into done
-            done = term | trunc
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             if i < self.steps_num - 1:
@@ -441,11 +348,12 @@ class SHAC:
             gamma = gamma * self.gamma
 
             # clear up gamma and rew_acc for done envs
-            gamma[trunc_env_ids] = 1.0
-            rew_acc[i + 1, trunc_env_ids] = 0.0
+            gamma[done_env_ids] = 1.0
+            rew_acc[i + 1, done_env_ids] = 0.0
+            rollout_lens.extend(rollout_len[done_env_ids].tolist())
+            rollout_len[done_env_ids] = 0
 
             # collect data for critic training
-            # TODO should behaviour before be the same for all of them?
             with torch.no_grad():
                 self.rew_buf[i] = rew.clone()
                 if i < self.steps_num - 1:
@@ -456,42 +364,40 @@ class SHAC:
 
             # collect episode loss
             with torch.no_grad():
-                self.episode_loss -= rew
-                self.episode_discounted_loss -= self.episode_gamma * rew
+                self.episode_loss -= raw_rew
+                self.episode_discounted_loss -= self.episode_gamma * raw_rew
                 self.episode_gamma *= self.gamma
-                if len(ep_done_env_ids) > 0:
-                    self.episode_loss_meter.update(self.episode_loss[ep_done_env_ids])
+                if len(done_env_ids) > 0:
+                    self.episode_loss_meter.update(self.episode_loss[done_env_ids])
                     self.episode_discounted_loss_meter.update(
-                        self.episode_discounted_loss[ep_done_env_ids]
+                        self.episode_discounted_loss[done_env_ids]
                     )
-                    self.episode_length_meter.update(
-                        self.episode_length[ep_done_env_ids]
-                    )
+                    self.episode_length_meter.update(self.episode_length[done_env_ids])
                     for k, v in filter(lambda x: x[0] in self.score_keys, info.items()):
                         self.episode_scores_meter_map[k + "_final"].update(
-                            v[ep_done_env_ids]
+                            v[done_env_ids]
                         )
-                    for ep_done_env_ids in ep_done_env_ids:
+                    for done_env_id in done_env_ids:
                         if (
-                            self.episode_loss[ep_done_env_ids] > 1e6
-                            or self.episode_loss[ep_done_env_ids] < -1e6
+                            self.episode_loss[done_env_id] > 1e6
+                            or self.episode_loss[done_env_id] < -1e6
                         ):
                             print("ep loss error")
                             raise ValueError
 
                         self.episode_loss_his.append(
-                            self.episode_loss[ep_done_env_ids].item()
+                            self.episode_loss[done_env_id].item()
                         )
                         self.episode_discounted_loss_his.append(
-                            self.episode_discounted_loss[ep_done_env_ids].item()
+                            self.episode_discounted_loss[done_env_id].item()
                         )
                         self.episode_length_his.append(
-                            self.episode_length[ep_done_env_ids].item()
+                            self.episode_length[done_env_id].item()
                         )
-                        self.episode_loss[ep_done_env_ids] = 0.0
-                        self.episode_discounted_loss[ep_done_env_ids] = 0.0
-                        self.episode_length[ep_done_env_ids] = 0
-                        self.episode_gamma[ep_done_env_ids] = 1.0
+                        self.episode_loss[done_env_id] = 0.0
+                        self.episode_discounted_loss[done_env_id] = 0.0
+                        self.episode_length[done_env_id] = 0
+                        self.episode_gamma[done_env_id] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -503,14 +409,8 @@ class SHAC:
         self.step_count += self.steps_num * self.num_envs
 
         # logging of horizon lengths
-        rew_acc_ = rew_acc.detach().cpu().numpy()
-        rollout_lens = np.array([])
-        for j in range(rew_acc_.shape[1]):
-            idx = np.argwhere(rew_acc_[:, j] == 0.0)
-            idx = np.append(idx, len(rew_acc_) - 1)
-            rollout_lens = np.append(rollout_lens, np.diff(idx))
-        # rollout_lens is a 1D array of lenghts of each rollout
-        self.rollout_len = np.mean(rollout_lens)
+        rollout_lens.extend(rollout_len.tolist())
+        self.mean_horizon = np.mean(rollout_lens)
 
         return actor_loss
 
@@ -539,8 +439,7 @@ class SHAC:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions), play=True)
-            done = term | trunc
+            obs, rew, done, _ = self.env.step(torch.tanh(actions))
 
             episode_length += 1
 
@@ -602,20 +501,9 @@ class SHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
+        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
-        if self.critic_name == "DoubleQCriticMLP":
-            q1, q2 = self.critic(batch_sample["obs"], batch_sample["act"])
-            critic_loss = ((q1 - target_values) ** 2).mean() + (
-                (q2 - target_values) ** 2
-            ).mean()
-        else:
-            if self.critic_name == "CriticMLP":
-                predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
-            elif self.critic_name == "QCriticMLP":
-                predicted_values = self.critic(
-                    batch_sample["obs"], batch_sample["act"]
-                ).squeeze(-1)
-            critic_loss = ((predicted_values - target_values) ** 2).mean()
+        critic_loss = ((predicted_values - target_values) ** 2).mean()
 
         return critic_loss
 
@@ -726,21 +614,12 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                if self.critic_name == "CriticMLP":
-                    dataset = CriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
-                else:
-                    dataset = QCriticDataset(
-                        self.batch_size,
-                        self.obs_buf,
-                        self.act_buf,
-                        self.target_values,
-                        drop_last=False,
-                    )
+                dataset = CriticDataset(
+                    self.batch_size,
+                    self.obs_buf,
+                    self.target_values,
+                    drop_last=False,
+                )
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")
@@ -878,35 +757,23 @@ class SHAC:
                 self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
                 self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
                 self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
-
                 self.writer.add_scalar(
-                    "rollout_len/step", self.rollout_len, self.step_count
+                    "actor_grad_norm/iter", self.grad_norm_before_clip, self.iter_count
                 )
                 self.writer.add_scalar(
-                    "rollout_len/iter", self.rollout_len, self.iter_count
+                    "actor_grad_norm/step", self.grad_norm_before_clip, self.step_count
                 )
-
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
 
-            np.savez(
-                open(os.path.join(self.log_dir, "jacobians.npz"), "wb"),
-                jacobians=self.jacobians,
-                contact_changes=self.contact_changes,
-                truncations=self.truncations,
-                early_stops=self.early_stops,
-                episode_ends=self.episode_ends,
-            )
-
             print(
-                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, rollout len {:.1f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
                     self.max_epochs,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
-                    self.rollout_len,
                     mean_episode_length,
                     self.mean_horizon,
                     self.step_count,
@@ -971,16 +838,8 @@ class SHAC:
     def save(self, filename=None):
         if filename is None:
             filename = "best_policy"
-        # double Q critic must be saved as state dict to be pickleable
-        if self.critic_name == "DoubleQCriticMLP":
-            print("saving critic state dict")
-            critic = self.critic.state_dict()
-            target_critic = self.target_critic.state_dict()
-        else:
-            critic = self.critic
-            target_critic = self.target_critic
         torch.save(
-            [self.actor, critic, target_critic, self.obs_rms, self.ret_rms],
+            [self.actor, self.critic, self.target_critic, self.obs_rms, self.ret_rms],
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
@@ -988,13 +847,8 @@ class SHAC:
         print("Loading policy from", path)
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
-        # double Q critic must be loaded as state dict to be pickleable
-        if self.critic_name == "DoubleQCriticMLP":
-            self.critic.load_state_dict(checkpoint[1])
-            self.target_critic.load_state_dict(checkpoint[2])
-        else:
-            self.critic = checkpoint[1].to(self.device)
-            self.target_critic = checkpoint[2].to(self.device)
+        self.critic = checkpoint[1].to(self.device)
+        self.target_critic = checkpoint[2].to(self.device)
         self.obs_rms = checkpoint[3].to(self.device)
         self.ret_rms = (
             checkpoint[4].to(self.device)

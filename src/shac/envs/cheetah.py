@@ -215,14 +215,6 @@ class CheetahEnv(DFlexEnv):
             self.MM_caching_frequency,
         )
 
-        # TODO this should be done conditionally
-        contacts_changed = next_state.body_f_s.clone().any(
-            dim=1
-        ) != self.state.body_f_s.clone().any(dim=1)
-        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
-        body_f_s = next_state.body_f_s.clone().view(self.num_envs, self.num_joint_q, -1)
-        num_contacts = (body_f_s.abs() > 1e-1).any(dim=-1).any(dim=-1)
-
         # compute dynamics jacobians if requested
         if self.jacobians and not play:
             inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
@@ -248,6 +240,14 @@ class CheetahEnv(DFlexEnv):
             # TODO why are there no jacobians for indices 11..17 ?
             jac = tu.jacobian2(outputs, inputs, max_out_dim=11)
 
+        contact_changed = (
+            next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        )
+        num_contact_changed = (
+            next_state.contact_changed.clone() - self.state.contact_changed.clone()
+        )
+        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
+        num_contact_changed = num_contact_changed.view(self.num_envs, -1).sum(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
 
@@ -270,7 +270,8 @@ class CheetahEnv(DFlexEnv):
             self.extras = {
                 "obs_before_reset": self.obs_buf_before_reset,
                 "episode_end": self.termination_buf,
-                "contacts_changed": contacts_changed,
+                "contact_changed": contact_changed,
+                "num_contact_changed": num_contact_changed,
             }
 
             if self.jacobians and not play:
@@ -284,7 +285,7 @@ class CheetahEnv(DFlexEnv):
 
         self.render()
 
-        return self.obs_buf, self.rew_buf, termination, truncation, self.extras
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:
