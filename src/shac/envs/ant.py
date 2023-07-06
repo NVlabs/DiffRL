@@ -44,6 +44,8 @@ class AntEnv(DFlexEnv):
         early_termination=True,
         contact_termination=False,
         jacobians=False,
+        contact_ke=4.0e4,
+        contact_kd=None,  #  1.0e4,
     ):
         num_obs = 37
         num_act = 8
@@ -64,6 +66,8 @@ class AntEnv(DFlexEnv):
         self.early_termination = early_termination
         self.contact_termination = contact_termination
         self.jacobians = jacobians
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 4.0
 
         self.init_sim()
 
@@ -147,8 +151,8 @@ class AntEnv(DFlexEnv):
                 density=1000.0,
                 stiffness=0.0,
                 damping=1.0,
-                contact_ke=4.0e4,
-                contact_kd=1.0e4,
+                contact_ke=self.contact_ke,
+                contact_kd=self.contact_kd,
                 contact_kf=3.0e3,
                 contact_mu=0.75,
                 limit_ke=1.0e3,
@@ -244,6 +248,14 @@ class AntEnv(DFlexEnv):
             self.MM_caching_frequency,
         )
 
+        contact_changed = (
+            next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        )
+        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
+        self.state = next_state
+
+        self.sim_time += self.sim_dt
+
         # TODO this should be done conditionally
         contacts_changed = next_state.body_f_s.clone().any(
             dim=1
@@ -301,6 +313,8 @@ class AntEnv(DFlexEnv):
 
             if self.jacobians and not play:
                 extras.update({"jacobian": jac.cpu().numpy()})
+
+        self.extras["contact_changed"] = contact_changed
 
         # reset all environments which have been terminated
         self.reset_buf = termination | truncation

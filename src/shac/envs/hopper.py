@@ -29,6 +29,8 @@ except ModuleNotFoundError:
 from shac.utils import load_utils as lu
 from shac.utils import torch_utils as tu
 
+# from shac.utils.integrator import ContactIntegrator
+
 
 class HopperEnv(DFlexEnv):
     def __init__(
@@ -44,6 +46,8 @@ class HopperEnv(DFlexEnv):
         early_termination=True,
         contact_termination=False,
         jacobians=False,
+        contact_ke=2.0e4,
+        contact_kd=None,  #  1.0e3,
     ):
         num_obs = 11
         num_act = 3
@@ -64,6 +68,8 @@ class HopperEnv(DFlexEnv):
         self.early_termination = early_termination
         self.contact_termination = contact_termination
         self.jacobians = jacobians
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 10.0
 
         self.init_sim()
 
@@ -132,12 +138,12 @@ class HopperEnv(DFlexEnv):
             lu.parse_mjcf(
                 os.path.join(asset_folder, "hopper.xml"),
                 self.builder,
-                density=1000.0,  # the way you calculate the mass of a body
-                stiffness=0.0,  # don't do anything
-                damping=2.0,  # don't do anything
-                contact_ke=2e4,  # the higher the more stiff; proportional to kd and kf
-                contact_kd=1e3,
-                contact_kf=1e3,
+                density=1000.0,
+                stiffness=0.0,
+                damping=2.0,
+                contact_ke=self.contact_ke,
+                contact_kd=self.contact_kd,
+                contact_kf=1.0e3,
                 contact_mu=0.9,
                 limit_ke=1e3,
                 limit_kd=1e1,
@@ -176,6 +182,7 @@ class HopperEnv(DFlexEnv):
         )
 
         self.integrator = df.sim.SemiImplicitIntegrator()
+        # self.integrator = ContactIntegrator()
 
         self.state = self.model.state()
 
@@ -213,14 +220,6 @@ class HopperEnv(DFlexEnv):
             self.MM_caching_frequency,
         )
 
-        # TODO this should be done conditionally
-        contacts_changed = next_state.body_f_s.clone().any(
-            dim=1
-        ) != self.state.body_f_s.clone().any(dim=1)
-        contacts_changed = contacts_changed.view(self.num_envs, -1).any(dim=1)
-        body_f_s = next_state.body_f_s.clone().view(self.num_envs, self.num_joint_q, -1)
-        num_contacts = (body_f_s.abs() > 1e-1).any(dim=-1).any(dim=-1)
-
         # compute dynamics jacobians if requested
         if self.jacobians and not play:
             inputs = torch.cat((self.obs_buf.clone(), unscaled_actions.clone()), dim=1)
@@ -245,6 +244,14 @@ class HopperEnv(DFlexEnv):
             )
             jac = tu.jacobian2(outputs, inputs)
 
+        contact_changed = (
+            next_state.contact_changed.clone() != self.state.contact_changed.clone()
+        )
+        num_contact_changed = (
+            next_state.contact_changed.clone() - self.state.contact_changed.clone()
+        )
+        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
+        num_contact_changed = num_contact_changed.view(self.num_envs, -1).sum(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
 
@@ -274,6 +281,9 @@ class HopperEnv(DFlexEnv):
 
             if self.jacobians and not play:
                 self.extras.update({"jacobian": jac.cpu().numpy()})
+
+        self.extras["contact_changed"] = contact_changed
+        self.extras["num_contact_changed"] = num_contact_changed
 
         # reset all environments which have been terminated
         self.reset_buf = termination | truncation

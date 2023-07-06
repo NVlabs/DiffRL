@@ -3,6 +3,16 @@ defaults:
   - env: cartpole
   - alg: shac
 
+
+hydra:
+  sweep:
+    dir: checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
+  # launcher: # submitit_slurm launcher params
+  #   gpus_per_node: 1
+  #   tasks_per_node: 4
+  #   cpus_per_task: 8
+  #
 exp_name: shac_benchmarks
 
 resume_model: null
@@ -29,6 +39,25 @@ env:
     games_num: 12
     num_actors: 4
 
+  ppo:
+    max_epochs: 2000 
+    minibatch_size: 1920
+    save_interval: 400
+    save_best_after: 100
+    num_actors: 1024
+    steps_num: 240
+    actor_mlp:
+      units: 
+        - 128
+        - 64
+        - 32
+    critic_mlp:
+      units:
+        - 64
+        - 64
+    lr: 3e-4
+    lr_schedule: adaptive
+
   shac:
     lambda: 0.95
     actor_mlp:
@@ -49,7 +78,25 @@ env:
       - 0.7
       - 0.95
 
-  shac2: ${.shac}
+  shac2:  
+    lambda: 0.95
+    actor_mlp:
+      units:
+        - 64
+        - 64
+    critic_mlp:
+      units:
+        - 64
+        - 64
+    target_critic_alpha: 0.4
+    actor_lr: 1e-3
+    critic_lr: 1e-3
+    max_epochs: 2000
+    save_interval: 400
+    steps_num: 32
+    betas: 
+      - 0.7
+      - 0.95
 
 wandb:
   project: shac

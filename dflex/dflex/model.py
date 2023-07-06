@@ -14,6 +14,7 @@ import numpy as np
 
 from typing import Tuple
 from typing import List
+
 Vec3 = List[float]
 Vec4 = List[float]
 Quat = List[float]
@@ -32,11 +33,12 @@ GEO_PLANE = 5
 GEO_NONE = 6
 
 # body joint types
-JOINT_PRISMATIC = 0 
+JOINT_PRISMATIC = 0
 JOINT_REVOLUTE = 1
 JOINT_BALL = 2
 JOINT_FIXED = 3
 JOINT_FREE = 4
+
 
 class Mesh:
     """Describes a triangle collision mesh for simulation
@@ -53,13 +55,13 @@ class Mesh:
     def __init__(self, vertices: List[Vec3], indices: List[int]):
         """Construct a Mesh object from a triangle mesh
 
-        The mesh center of mass and inertia tensor will automatically be 
+        The mesh center of mass and inertia tensor will automatically be
         calculated using a density of 1.0. This computation is only valid
         if the mesh is closed (two-manifold).
 
         Args:
             vertices: List of vertices in the mesh
-            indices: List of triangle indices, 3 per-element       
+            indices: List of triangle indices, 3 per-element
         """
 
         self.vertices = vertices
@@ -97,7 +99,12 @@ class Mesh:
 
             # quadrature points lie on the line between the
             # centroid and each vertex of the tetrahedron
-            quads = (mid + (p - mid) * alpha, mid + (q - mid) * alpha, mid + (r - mid) * alpha, mid + (com - mid) * alpha)
+            quads = (
+                mid + (p - mid) * alpha,
+                mid + (q - mid) * alpha,
+                mid + (r - mid) * alpha,
+                mid + (com - mid) * alpha,
+            )
 
             for j in range(4):
 
@@ -114,10 +121,10 @@ class Mesh:
 
 class State:
     """The State object holds all *time-varying* data for a model.
-    
+
     Time-varying data includes particle positions, velocities, rigid body states, and
-    anything that is output from the integrator as derived data, e.g.: forces. 
-    
+    anything that is output from the integrator as derived data, e.g.: forces.
+
     The exact attributes depend on the contents of the model. State objects should
     generally be created using the :func:`Model.state()` function.
 
@@ -133,7 +140,7 @@ class State:
     """
 
     def __init__(self):
-        
+
         self.particle_count = 0
         self.link_count = 0
 
@@ -159,7 +166,6 @@ class State:
 
     #     return tensors
 
-
     def flatten(self):
         """Returns a list of Tensors stored by the state
 
@@ -171,7 +177,7 @@ class State:
 
         # build a list of all tensor attributes
         for attr, value in self.__dict__.items():
-            if (torch.is_tensor(value)):
+            if torch.is_tensor(value):
                 tensors.append(value)
 
         return tensors
@@ -213,7 +219,7 @@ class Model:
         tet_poses (torch.Tensor): Tetrahedral rest poses, shape [tet_count, 3, 3], float
         tet_activations (torch.Tensor): Tetrahedral volumetric activations, shape [tet_count], float
         tet_materials (torch.Tensor): Tetrahedral elastic parameters in form :math:`k_{mu}, k_{lambda}, k_{damp}`, shape [tet_count, 3]
-        
+
         body_X_cm (torch.Tensor): Rigid body center of mass (in local frame), shape [link_count, 7], float
         body_I_m (torch.Tensor): Rigid body inertia tensor (relative to COM), shape [link_count, 3, 3], float
 
@@ -244,10 +250,10 @@ class Model:
         edge_count (int): Total number of edges in the system
         spring_count (int): Total number of springs in the system
         contact_count (int): Total number of contacts in the system
-        
+
     Note:
         It is strongly recommended to use the ModelBuilder to construct a simulation rather
-        than creating your own Model object directly, however it is possible to do so if 
+        than creating your own Model object directly, however it is possible to do so if
         desired.
     """
 
@@ -282,7 +288,7 @@ class Model:
         self.tet_poses = None
         self.tet_activations = None
         self.tet_materials = None
-        
+
         self.body_X_cm = None
         self.body_I_m = None
 
@@ -317,9 +323,9 @@ class Model:
         self.gravity = torch.tensor((0.0, -9.8, 0.0), dtype=torch.float32, device=adapter)
 
         self.contact_distance = 0.1
-        self.contact_ke = 1.e+3
+        self.contact_ke = 1.0e3
         self.contact_kd = 0.0
-        self.contact_kf = 1.e+3
+        self.contact_kf = 1.0e3
         self.contact_mu = 0.5
 
         self.tri_ke = 100.0
@@ -347,16 +353,16 @@ class Model:
         s.particle_count = self.particle_count
         s.link_count = self.link_count
 
-        #--------------------------------
+        # --------------------------------
         # dynamic state (input, output)
-          
+
         # particles
-        if (self.particle_count):
+        if self.particle_count:
             s.particle_q = torch.clone(self.particle_q)
             s.particle_qd = torch.clone(self.particle_qd)
 
         # articulations
-        if (self.link_count):
+        if self.link_count:
             s.joint_q = torch.clone(self.joint_q)
             s.joint_qd = torch.clone(self.joint_qd)
             s.joint_act = torch.zeros_like(self.joint_qd)
@@ -364,36 +370,45 @@ class Model:
             s.joint_q.requires_grad = True
             s.joint_qd.requires_grad = True
 
-
-        #--------------------------------
+        # --------------------------------
         # derived state (output only)
-        
-        if (self.particle_count):
+
+        if self.particle_count:
             s.particle_f = torch.empty_like(self.particle_qd, requires_grad=True)
 
+        if self.link_count:
 
-        if (self.link_count):
-            
             # joints
             s.joint_qdd = torch.empty_like(self.joint_qd, requires_grad=True)
             s.joint_tau = torch.empty_like(self.joint_qd, requires_grad=True)
-            s.joint_S_s = torch.empty((self.joint_dof_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)            
+            s.joint_S_s = torch.empty(
+                (self.joint_dof_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True
+            )
 
             # derived rigid body data (maximal coordinates)
-            s.body_X_sc = torch.empty((self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            s.body_X_sm = torch.empty((self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            s.body_I_s = torch.empty((self.link_count, 6, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
+            s.body_X_sc = torch.empty(
+                (self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True
+            )
+            s.body_X_sm = torch.empty(
+                (self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True
+            )
+            s.body_I_s = torch.empty(
+                (self.link_count, 6, 6), dtype=torch.float32, device=self.adapter, requires_grad=True
+            )
             s.body_v_s = torch.empty((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
             s.body_a_s = torch.empty((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
             s.body_f_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            #s.body_ft_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            #s.body_f_ext_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
+            s.contact_changed = torch.zeros(
+                self.link_count, dtype=torch.float32, device=self.adapter, requires_grad=True
+            )
+            # s.body_ft_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
+            # s.body_f_ext_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
 
         return s
 
     def alloc_mass_matrix(self):
 
-        if (self.link_count):
+        if self.link_count:
 
             # system matrices
             self.M = torch.zeros(self.M_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
@@ -415,7 +430,7 @@ class Model:
 
         # build a list of all tensor attributes
         for attr, value in self.__dict__.items():
-            if (torch.is_tensor(value)):
+            if torch.is_tensor(value):
                 tensors.append(value)
 
         return tensors
@@ -427,7 +442,7 @@ class Model:
         This method performs collision detection between rigid body vertices in the scene and updates
         the model's set of contacts stored as the following attributes:
 
-            * **contact_body0**: Tensor of ints with first rigid body index 
+            * **contact_body0**: Tensor of ints with first rigid body index
             * **contact_body1**: Tensor of ints with second rigid body index (currently always -1 to indicate ground)
             * **contact_point0**: Tensor of Vec3 representing contact point in local frame of body0
             * **contact_dist**: Tensor of float values representing the distance to maintain
@@ -467,13 +482,13 @@ class Model:
 
             geo_type = self.shape_geo_type[i].item()
 
-            if (geo_type == GEO_SPHERE):
+            if geo_type == GEO_SPHERE:
 
                 radius = self.shape_geo_scale[i][0].item()
 
                 add_contact(self.shape_body[i], -1, X_bs, (0.0, 0.0, 0.0), radius, i)
 
-            elif (geo_type == GEO_CAPSULE):
+            elif geo_type == GEO_CAPSULE:
 
                 radius = self.shape_geo_scale[i][0].item()
                 half_width = self.shape_geo_scale[i][1].item()
@@ -481,20 +496,20 @@ class Model:
                 add_contact(self.shape_body[i], -1, X_bs, (-half_width, 0.0, 0.0), radius, i)
                 add_contact(self.shape_body[i], -1, X_bs, (half_width, 0.0, 0.0), radius, i)
 
-            elif (geo_type == GEO_BOX):
+            elif geo_type == GEO_BOX:
 
                 edges = self.shape_geo_scale[i].tolist()
 
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], -edges[1], -edges[2]), 0.0, i)        
-                add_contact(self.shape_body[i], -1, X_bs, ( edges[0], -edges[1], -edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0],  edges[1], -edges[2]), 0.0, i)
+                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], -edges[1], -edges[2]), 0.0, i)
+                add_contact(self.shape_body[i], -1, X_bs, (edges[0], -edges[1], -edges[2]), 0.0, i)
+                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], edges[1], -edges[2]), 0.0, i)
                 add_contact(self.shape_body[i], -1, X_bs, (edges[0], edges[1], -edges[2]), 0.0, i)
                 add_contact(self.shape_body[i], -1, X_bs, (-edges[0], -edges[1], edges[2]), 0.0, i)
                 add_contact(self.shape_body[i], -1, X_bs, (edges[0], -edges[1], edges[2]), 0.0, i)
                 add_contact(self.shape_body[i], -1, X_bs, (-edges[0], edges[1], edges[2]), 0.0, i)
                 add_contact(self.shape_body[i], -1, X_bs, (edges[0], edges[1], edges[2]), 0.0, i)
 
-            elif (geo_type == GEO_MESH):
+            elif geo_type == GEO_MESH:
 
                 mesh = self.shape_geo_src[i]
                 scale = self.shape_geo_scale[i]
@@ -515,16 +530,13 @@ class Model:
         self.contact_count = len(body0)
 
 
-
-
-
 class ModelBuilder:
     """A helper class for building simulation models at runtime.
 
     Use the ModelBuilder to construct a simulation scene. The ModelBuilder
     is independent of PyTorch and builds the scene representation using
-    standard Python data structures, this means it is not differentiable. Once :func:`finalize()` 
-    has been called the ModelBuilder transfers all data to Torch tensors and returns 
+    standard Python data structures, this means it is not differentiable. Once :func:`finalize()`
+    has been called the ModelBuilder transfers all data to Torch tensors and returns
     an object that may be used for simulation.
 
     Example:
@@ -546,10 +558,10 @@ class ModelBuilder:
 
     Note:
         It is strongly recommended to use the ModelBuilder to construct a simulation rather
-        than creating your own Model object directly, however it is possible to do so if 
+        than creating your own Model object directly, however it is possible to do so if
         desired.
     """
-    
+
     def __init__(self):
 
         # particles
@@ -599,14 +611,14 @@ class ModelBuilder:
         self.muscle_points = []
 
         # rigid bodies
-        self.joint_parent = []         # index of the parent body                      (constant)
-        self.joint_child = []          # index of the child body                       (constant)
-        self.joint_axis = []           # joint axis in child joint frame               (constant)
-        self.joint_X_pj = []           # frame of joint in parent                      (constant)
-        self.joint_X_cm = []           # frame of child com (in child coordinates)     (constant)
+        self.joint_parent = []  # index of the parent body                      (constant)
+        self.joint_child = []  # index of the child body                       (constant)
+        self.joint_axis = []  # joint axis in child joint frame               (constant)
+        self.joint_X_pj = []  # frame of joint in parent                      (constant)
+        self.joint_X_cm = []  # frame of child com (in child coordinates)     (constant)
 
-        self.joint_q_start = []        # joint offset in the q array
-        self.joint_qd_start = []       # joint offset in the qd array
+        self.joint_q_start = []  # joint offset in the q array
+        self.joint_qd_start = []  # joint offset in the qd array
         self.joint_type = []
         self.joint_armature = []
         self.joint_target_ke = []
@@ -617,11 +629,11 @@ class ModelBuilder:
         self.joint_limit_ke = []
         self.joint_limit_kd = []
 
-        self.joint_q = []              # generalized coordinates       (input)
-        self.joint_qd = []             # generalized velocities        (input)
-        self.joint_qdd = []            # generalized accelerations     (id,fd)
-        self.joint_tau = []            # generalized actuation         (input)
-        self.joint_u = []              # generalized total torque      (fd)
+        self.joint_q = []  # generalized coordinates       (input)
+        self.joint_qd = []  # generalized velocities        (input)
+        self.joint_qdd = []  # generalized accelerations     (id,fd)
+        self.joint_tau = []  # generalized actuation         (input)
+        self.joint_u = []  # generalized total torque      (fd)
 
         self.body_mass = []
         self.body_inertia = []
@@ -630,33 +642,33 @@ class ModelBuilder:
         self.articulation_start = []
 
     def add_articulation(self) -> int:
-        """Add an articulation object, all subsequently added links (see: :func:`add_link`) will belong to this articulation object. 
+        """Add an articulation object, all subsequently added links (see: :func:`add_link`) will belong to this articulation object.
         Calling this method multiple times 'closes' any previous articulations and begins a new one.
 
         Returns:
             The index of the articulation
         """
         self.articulation_start.append(len(self.joint_type))
-        return len(self.articulation_start)-1
-
+        return len(self.articulation_start) - 1
 
     # rigids, register a rigid body and return its index.
     def add_link(
-        self, 
-        parent : int, 
-        X_pj : Transform, 
-        axis : Vec3, 
-        type : int, 
-        armature: float=0.01, 
-        stiffness: float=0.0, 
-        damping: float=0.0,
-        limit_lower: float=-1.e+3,
-        limit_upper: float=1.e+3,
-        limit_ke: float=100.0,
-        limit_kd: float=10.0,
-        com: Vec3=np.zeros(3), 
-        I_m: Mat33=np.zeros((3, 3)), 
-        m: float=0.0) -> int:
+        self,
+        parent: int,
+        X_pj: Transform,
+        axis: Vec3,
+        type: int,
+        armature: float = 0.01,
+        stiffness: float = 0.0,
+        damping: float = 0.0,
+        limit_lower: float = -1.0e3,
+        limit_upper: float = 1.0e3,
+        limit_ke: float = 100.0,
+        limit_kd: float = 10.0,
+        com: Vec3 = np.zeros(3),
+        I_m: Mat33 = np.zeros((3, 3)),
+        m: float = 0.0,
+    ) -> int:
         """Adds a rigid body to the model.
 
         Args:
@@ -688,12 +700,12 @@ class ModelBuilder:
         self.joint_target_ke.append(stiffness)
         self.joint_target_kd.append(damping)
         self.joint_limit_ke.append(limit_ke)
-        self.joint_limit_kd.append(limit_kd)        
+        self.joint_limit_kd.append(limit_kd)
 
         self.joint_q_start.append(len(self.joint_q))
         self.joint_qd_start.append(len(self.joint_qd))
 
-        if (type == JOINT_PRISMATIC):
+        if type == JOINT_PRISMATIC:
             self.joint_q.append(0.0)
             self.joint_qd.append(0.0)
             self.joint_target.append(0.0)
@@ -701,7 +713,7 @@ class ModelBuilder:
             self.joint_limit_lower.append(limit_lower)
             self.joint_limit_upper.append(limit_upper)
 
-        elif (type == JOINT_REVOLUTE):
+        elif type == JOINT_REVOLUTE:
             self.joint_q.append(0.0)
             self.joint_qd.append(0.0)
             self.joint_target.append(0.0)
@@ -709,8 +721,8 @@ class ModelBuilder:
             self.joint_limit_lower.append(limit_lower)
             self.joint_limit_upper.append(limit_upper)
 
-        elif (type == JOINT_BALL):
-            
+        elif type == JOINT_BALL:
+
             # quaternion
             self.joint_q.append(0.0)
             self.joint_q.append(0.0)
@@ -736,16 +748,15 @@ class ModelBuilder:
             self.joint_limit_lower.append(limit_lower)
             self.joint_limit_lower.append(limit_lower)
             self.joint_limit_lower.append(0.0)
-                       
+
             self.joint_limit_upper.append(limit_upper)
             self.joint_limit_upper.append(limit_upper)
             self.joint_limit_upper.append(limit_upper)
             self.joint_limit_upper.append(0.0)
 
-
-        elif (type == JOINT_FIXED):
+        elif type == JOINT_FIXED:
             pass
-        elif (type == JOINT_FREE):
+        elif type == JOINT_FREE:
 
             # translation
             self.joint_q.append(0.0)
@@ -781,7 +792,7 @@ class ModelBuilder:
             self.joint_limit_lower.append(0.0)
             self.joint_limit_lower.append(0.0)
             self.joint_limit_lower.append(0.0)
-                       
+
             self.joint_limit_upper.append(0.0)
             self.joint_limit_upper.append(0.0)
             self.joint_limit_upper.append(0.0)
@@ -801,9 +812,10 @@ class ModelBuilder:
         # return index of body
         return len(self.joint_type) - 1
 
-
     # muscles
-    def add_muscle(self, links: List[int], positions: List[Vec3], f0: float, lm: float, lt: float, lmax: float, pen: float) -> float:
+    def add_muscle(
+        self, links: List[int], positions: List[Vec3], f0: float, lm: float, lt: float, lmax: float, pen: float
+    ) -> float:
         """Adds a muscle-tendon activation unit
 
         Args:
@@ -831,10 +843,17 @@ class ModelBuilder:
             self.muscle_points.append(positions[i])
 
         # return the index of the muscle
-        return len(self.muscle_start)-1
+        return len(self.muscle_start) - 1
 
     # shapes
-    def add_shape_plane(self, plane: Vec4=(0.0, 1.0, 0.0, 0.0), ke: float=1.e+5, kd: float=1000.0, kf: float=1000.0, mu: float=0.5):
+    def add_shape_plane(
+        self,
+        plane: Vec4 = (0.0, 1.0, 0.0, 0.0),
+        ke: float = 1.0e5,
+        kd: float = 1000.0,
+        kf: float = 1000.0,
+        mu: float = 0.5,
+    ):
         """Adds a plane collision shape
 
         Args:
@@ -847,7 +866,18 @@ class ModelBuilder:
         """
         self._add_shape(-1, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), GEO_PLANE, plane, None, 0.0, ke, kd, kf, mu)
 
-    def add_shape_sphere(self, body, pos: Vec3=(0.0, 0.0, 0.0), rot: Quat=(0.0, 0.0, 0.0, 1.0), radius: float=1.0, density: float=1000.0, ke: float=1.e+5, kd: float=1000.0, kf: float=1000.0, mu: float=0.5):
+    def add_shape_sphere(
+        self,
+        body,
+        pos: Vec3 = (0.0, 0.0, 0.0),
+        rot: Quat = (0.0, 0.0, 0.0, 1.0),
+        radius: float = 1.0,
+        density: float = 1000.0,
+        ke: float = 1.0e5,
+        kd: float = 1000.0,
+        kf: float = 1000.0,
+        mu: float = 0.5,
+    ):
         """Adds a sphere collision shape to a link.
 
         Args:
@@ -865,18 +895,20 @@ class ModelBuilder:
 
         self._add_shape(body, pos, rot, GEO_SPHERE, (radius, 0.0, 0.0, 0.0), None, density, ke, kd, kf, mu)
 
-    def add_shape_box(self,
-                      body : int,
-                      pos: Vec3=(0.0, 0.0, 0.0),
-                      rot: Quat=(0.0, 0.0, 0.0, 1.0),
-                      hx: float=0.5,
-                      hy: float=0.5,
-                      hz: float=0.5,
-                      density: float=1000.0,
-                      ke: float=1.e+5,
-                      kd: float=1000.0,
-                      kf: float=1000.0,
-                      mu: float=0.5):
+    def add_shape_box(
+        self,
+        body: int,
+        pos: Vec3 = (0.0, 0.0, 0.0),
+        rot: Quat = (0.0, 0.0, 0.0, 1.0),
+        hx: float = 0.5,
+        hy: float = 0.5,
+        hz: float = 0.5,
+        density: float = 1000.0,
+        ke: float = 1.0e5,
+        kd: float = 1000.0,
+        kf: float = 1000.0,
+        mu: float = 0.5,
+    ):
         """Adds a box collision shape to a link.
 
         Args:
@@ -896,17 +928,19 @@ class ModelBuilder:
 
         self._add_shape(body, pos, rot, GEO_BOX, (hx, hy, hz, 0.0), None, density, ke, kd, kf, mu)
 
-    def add_shape_capsule(self,
-                          body: int,
-                          pos: Vec3=(0.0, 0.0, 0.0),
-                          rot: Quat=(0.0, 0.0, 0.0, 1.0),
-                          radius: float=1.0,
-                          half_width: float=0.5,
-                          density: float=1000.0,
-                          ke: float=1.e+5,
-                          kd: float=1000.0,
-                          kf: float=1000.0,
-                          mu: float=0.5):
+    def add_shape_capsule(
+        self,
+        body: int,
+        pos: Vec3 = (0.0, 0.0, 0.0),
+        rot: Quat = (0.0, 0.0, 0.0, 1.0),
+        radius: float = 1.0,
+        half_width: float = 0.5,
+        density: float = 1000.0,
+        ke: float = 1.0e5,
+        kd: float = 1000.0,
+        kf: float = 1000.0,
+        mu: float = 0.5,
+    ):
         """Adds a capsule collision shape to a link.
 
         Args:
@@ -925,17 +959,19 @@ class ModelBuilder:
 
         self._add_shape(body, pos, rot, GEO_CAPSULE, (radius, half_width, 0.0, 0.0), None, density, ke, kd, kf, mu)
 
-    def add_shape_mesh(self,
-                       body: int,
-                       pos: Vec3=(0.0, 0.0, 0.0),
-                       rot: Quat=(0.0, 0.0, 0.0, 1.0),
-                       mesh: Mesh=None,
-                       scale: Vec3=(1.0, 1.0, 1.0),
-                       density: float=1000.0,
-                       ke: float=1.e+5,
-                       kd: float=1000.0,
-                       kf: float=1000.0,
-                       mu: float=0.5):
+    def add_shape_mesh(
+        self,
+        body: int,
+        pos: Vec3 = (0.0, 0.0, 0.0),
+        rot: Quat = (0.0, 0.0, 0.0, 1.0),
+        mesh: Mesh = None,
+        scale: Vec3 = (1.0, 1.0, 1.0),
+        density: float = 1000.0,
+        ke: float = 1.0e5,
+        kd: float = 1000.0,
+        kf: float = 1000.0,
+        mu: float = 0.5,
+    ):
         """Adds a triangle mesh collision shape to a link.
 
         Args:
@@ -952,10 +988,9 @@ class ModelBuilder:
 
         """
 
-
         self._add_shape(body, pos, rot, GEO_MESH, (scale[0], scale[1], scale[2], 0.0), mesh, density, ke, kd, kf, mu)
 
-    def _add_shape(self, body , pos, rot, type, scale, src, density, ke, kd, kf, mu):
+    def _add_shape(self, body, pos, rot, type, scale, src, density, ke, kd, kf, mu):
         self.shape_body.append(body)
         self.shape_transform.append(transform(pos, rot))
         self.shape_geo_type.append(type)
@@ -968,7 +1003,7 @@ class ModelBuilder:
         self._update_body_mass(body, m, I, np.array(pos), np.array(rot))
 
     # particles
-    def add_particle(self, pos : Vec3, vel : Vec3, mass : float) -> int:
+    def add_particle(self, pos: Vec3, vel: Vec3, mass: float) -> int:
         """Adds a single particle to the model
 
         Args:
@@ -988,7 +1023,7 @@ class ModelBuilder:
 
         return len(self.particle_q) - 1
 
-    def add_spring(self, i : int, j, ke : float, kd : float, control: float):
+    def add_spring(self, i: int, j, ke: float, kd: float, control: float):
         """Adds a spring between two particles in the system
 
         Args:
@@ -1002,7 +1037,7 @@ class ModelBuilder:
             The spring is created with a rest-length based on the distance
             between the particles in their initial configuration.
 
-        """        
+        """
         self.spring_indices.append(i)
         self.spring_indices.append(j)
         self.spring_stiffness.append(ke)
@@ -1018,8 +1053,8 @@ class ModelBuilder:
 
         self.spring_rest_length.append(l)
 
-    def add_triangle(self, i : int, j : int, k : int) -> float:
-        """Adds a trianglular FEM element between three particles in the system. 
+    def add_triangle(self, i: int, j: int, k: int) -> float:
+        """Adds a trianglular FEM element between three particles in the system.
 
         Triangles are modeled as viscoelastic elements with elastic stiffness and damping
         Parameters specfied on the model. See model.tri_ke, model.tri_kd.
@@ -1039,7 +1074,7 @@ class ModelBuilder:
         Todo:
             * Expose elastic paramters on a per-element basis
 
-        """      
+        """
         # compute basis for 2D rest pose
         p = np.array(self.particle_q[i])
         q = np.array(self.particle_q[j])
@@ -1061,7 +1096,7 @@ class ModelBuilder:
 
         area = np.linalg.det(D) / 2.0
 
-        if (area < 0.0):
+        if area < 0.0:
             print("inverted triangle element")
 
         self.tri_indices.append((i, j, k))
@@ -1070,8 +1105,10 @@ class ModelBuilder:
 
         return area
 
-    def add_tetrahedron(self, i: int, j: int, k: int, l: int, k_mu: float=1.e+3, k_lambda: float=1.e+3, k_damp: float=0.0) -> float:
-        """Adds a tetrahedral FEM element between four particles in the system. 
+    def add_tetrahedron(
+        self, i: int, j: int, k: int, l: int, k_mu: float = 1.0e3, k_lambda: float = 1.0e3, k_damp: float = 0.0
+    ) -> float:
+        """Adds a tetrahedral FEM element between four particles in the system.
 
         Tetrahdera are modeled as viscoelastic elements with a NeoHookean energy
         density based on [Smith et al. 2018].
@@ -1091,7 +1128,7 @@ class ModelBuilder:
         Note:
             The tetrahedron is created with a rest-pose based on the particle's initial configruation
 
-        """      
+        """
         # compute basis for 2D rest pose
         p = np.array(self.particle_q[i])
         q = np.array(self.particle_q[j])
@@ -1105,7 +1142,7 @@ class ModelBuilder:
         Dm = np.matrix((qp, rp, sp)).T
         volume = np.linalg.det(Dm) / 6.0
 
-        if (volume <= 0.0):
+        if volume <= 0.0:
             print("inverted tetrahedral element")
         else:
 
@@ -1118,8 +1155,8 @@ class ModelBuilder:
 
         return volume
 
-    def add_edge(self, i: int, j: int, k: int, l: int, rest: float=None):
-        """Adds a bending edge element between four particles in the system. 
+    def add_edge(self, i: int, j: int, k: int, l: int, rest: float = None):
+        """Adds a bending edge element between four particles in the system.
 
         Bending elements are designed to be between two connected triangles. Then
         bending energy is based of [Bridson et al. 2002]. Bending stiffness is controlled
@@ -1137,9 +1174,9 @@ class ModelBuilder:
             vertices indexed by 'i' and 'j'. This defines two connected triangles with counter clockwise
             winding: (i, k, l), (j, l, k).
 
-        """      
+        """
         # compute rest angle
-        if (rest == None):
+        if rest == None:
 
             x1 = np.array(self.particle_q[i])
             x2 = np.array(self.particle_q[j])
@@ -1160,20 +1197,22 @@ class ModelBuilder:
         self.edge_indices.append((i, j, k, l))
         self.edge_rest_angle.append(rest)
 
-    def add_cloth_grid(self,
-                       pos: Vec3,
-                       rot: Quat,
-                       vel: Vec3,
-                       dim_x: int,
-                       dim_y: int,
-                       cell_x: float,
-                       cell_y: float,
-                       mass: float,
-                       reverse_winding: bool=False,
-                       fix_left: bool=False,
-                       fix_right: bool=False,
-                       fix_top: bool=False,
-                       fix_bottom: bool=False):
+    def add_cloth_grid(
+        self,
+        pos: Vec3,
+        rot: Quat,
+        vel: Vec3,
+        dim_x: int,
+        dim_y: int,
+        cell_x: float,
+        cell_y: float,
+        mass: float,
+        reverse_winding: bool = False,
+        fix_left: bool = False,
+        fix_right: bool = False,
+        fix_top: bool = False,
+        fix_bottom: bool = False,
+    ):
 
         """Helper to create a regular planar cloth grid
 
@@ -1191,15 +1230,14 @@ class ModelBuilder:
             mass: The mass of each particle
             reverse_winding: Flip the winding of the mesh
             fix_left: Make the left-most edge of particles kinematic (fixed in place)
-            fix_right: Make the right-most edge of particles kinematic 
+            fix_right: Make the right-most edge of particles kinematic
             fix_top: Make the top-most edge of particles kinematic
             fix_bottom: Make the bottom-most edge of particles kinematic
 
-        """ 
+        """
 
         def grid_index(x, y, dim_x):
             return y * dim_x + x
-
 
         start_vertex = len(self.particle_q)
         start_tri = len(self.tri_indices)
@@ -1211,40 +1249,48 @@ class ModelBuilder:
                 p = quat_rotate(rot, g) + pos
                 m = mass
 
-                if (x == 0 and fix_left):
+                if x == 0 and fix_left:
                     m = 0.0
-                elif (x == dim_x and fix_right):
+                elif x == dim_x and fix_right:
                     m = 0.0
-                elif (y == 0 and fix_bottom):
+                elif y == 0 and fix_bottom:
                     m = 0.0
-                elif (y == dim_y and fix_top):
+                elif y == dim_y and fix_top:
                     m = 0.0
 
                 self.add_particle(p, vel, m)
 
-                if (x > 0 and y > 0):
+                if x > 0 and y > 0:
 
-                    if (reverse_winding):
-                        tri1 = (start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x, y, dim_x + 1))
+                    if reverse_winding:
+                        tri1 = (
+                            start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x, y, dim_x + 1),
+                        )
 
-                        tri2 = (start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x, y, dim_x + 1),
-                                start_vertex + grid_index(x - 1, y, dim_x + 1))
+                        tri2 = (
+                            start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x, y, dim_x + 1),
+                            start_vertex + grid_index(x - 1, y, dim_x + 1),
+                        )
 
                         self.add_triangle(*tri1)
                         self.add_triangle(*tri2)
 
                     else:
 
-                        tri1 = (start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x - 1, y, dim_x + 1))
+                        tri1 = (
+                            start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x - 1, y, dim_x + 1),
+                        )
 
-                        tri2 = (start_vertex + grid_index(x, y - 1, dim_x + 1),
-                                start_vertex + grid_index(x, y, dim_x + 1),
-                                start_vertex + grid_index(x - 1, y, dim_x + 1))
+                        tri2 = (
+                            start_vertex + grid_index(x, y - 1, dim_x + 1),
+                            start_vertex + grid_index(x, y, dim_x + 1),
+                            start_vertex + grid_index(x - 1, y, dim_x + 1),
+                        )
 
                         self.add_triangle(*tri1)
                         self.add_triangle(*tri2)
@@ -1259,12 +1305,23 @@ class ModelBuilder:
         for k, e in adj.edges.items():
 
             # skip open edges
-            if (e.f0 == -1 or e.f1 == -1):
+            if e.f0 == -1 or e.f1 == -1:
                 continue
 
-            self.add_edge(e.o0, e.o1, e.v0, e.v1)          # opposite 0, opposite 1, vertex 0, vertex 1
+            self.add_edge(e.o0, e.o1, e.v0, e.v1)  # opposite 0, opposite 1, vertex 0, vertex 1
 
-    def add_cloth_mesh(self, pos: Vec3, rot: Quat, scale: float, vel: Vec3, vertices: List[Vec3], indices: List[int], density: float, edge_callback=None, face_callback=None):
+    def add_cloth_mesh(
+        self,
+        pos: Vec3,
+        rot: Quat,
+        scale: float,
+        vel: Vec3,
+        vertices: List[Vec3],
+        indices: List[int],
+        density: float,
+        edge_callback=None,
+        face_callback=None,
+    ):
         """Helper to create a cloth model from a regular triangle mesh
 
         Creates one FEM triangle element and one bending element for every face
@@ -1304,13 +1361,13 @@ class ModelBuilder:
             j = start_vertex + indices[t * 3 + 1]
             k = start_vertex + indices[t * 3 + 2]
 
-            if (face_callback):
+            if face_callback:
                 face_callback(i, j, k)
 
             area = self.add_triangle(i, j, k)
 
             # add area fraction to particles
-            if (area > 0.0):
+            if area > 0.0:
 
                 self.particle_mass[i] += density * area / 3.0
                 self.particle_mass[j] += density * area / 3.0
@@ -1325,36 +1382,38 @@ class ModelBuilder:
         for k, e in adj.edges.items():
 
             # skip open edges
-            if (e.f0 == -1 or e.f1 == -1):
+            if e.f0 == -1 or e.f1 == -1:
                 continue
 
-            if (edge_callback):
+            if edge_callback:
                 edge_callback(e.f0, e.f1)
 
             self.add_edge(e.o0, e.o1, e.v0, e.v1)
 
-    def add_soft_grid(self,
-                      pos: Vec3,
-                      rot: Quat,
-                      vel: Vec3,
-                      dim_x: int,
-                      dim_y: int,
-                      dim_z: int,
-                      cell_x: float,
-                      cell_y: float,
-                      cell_z: float,
-                      density: float,
-                      k_mu: float,
-                      k_lambda: float,
-                      k_damp: float,
-                      fix_left: bool=False,
-                      fix_right: bool=False,
-                      fix_top: bool=False,
-                      fix_bottom: bool=False):
+    def add_soft_grid(
+        self,
+        pos: Vec3,
+        rot: Quat,
+        vel: Vec3,
+        dim_x: int,
+        dim_y: int,
+        dim_z: int,
+        cell_x: float,
+        cell_y: float,
+        cell_z: float,
+        density: float,
+        k_mu: float,
+        k_lambda: float,
+        k_damp: float,
+        fix_left: bool = False,
+        fix_right: bool = False,
+        fix_top: bool = False,
+        fix_bottom: bool = False,
+    ):
         """Helper to create a rectangular tetrahedral FEM grid
 
         Creates a regular grid of FEM tetrhedra and surface triangles. Useful for example
-        to create beams and sheets. Each hexahedral cell is decomposed into 5 
+        to create beams and sheets. Each hexahedral cell is decomposed into 5
         tetrahedral elements.
 
         Args:
@@ -1372,7 +1431,7 @@ class ModelBuilder:
             k_lambda: The second elastic Lame parameter
             k_damp: The damping stiffness
             fix_left: Make the left-most edge of particles kinematic (fixed in place)
-            fix_right: Make the right-most edge of particles kinematic 
+            fix_right: Make the right-most edge of particles kinematic
             fix_top: Make the top-most edge of particles kinematic
             fix_bottom: Make the bottom-most edge of particles kinematic
         """
@@ -1388,16 +1447,16 @@ class ModelBuilder:
                     v = np.array((x * cell_x, y * cell_y, z * cell_z))
                     m = mass
 
-                    if (fix_left and x == 0):
+                    if fix_left and x == 0:
                         m = 0.0
 
-                    if (fix_right and x == dim_x):
+                    if fix_right and x == dim_x:
                         m = 0.0
 
-                    if (fix_top and y == dim_y):
+                    if fix_top and y == dim_y:
                         m = 0.0
 
-                    if (fix_bottom and y == 0):
+                    if fix_bottom and y == 0:
                         m = 0.0
 
                     p = quat_rotate(rot, v) + pos
@@ -1439,7 +1498,7 @@ class ModelBuilder:
                     v6 = grid_index(x + 1, y + 1, z + 1) + start_vertex
                     v7 = grid_index(x, y + 1, z + 1) + start_vertex
 
-                    if (((x & 1) ^ (y & 1) ^ (z & 1))):
+                    if (x & 1) ^ (y & 1) ^ (z & 1):
 
                         add_tet(v0, v1, v4, v3)
                         add_tet(v2, v3, v6, v1)
@@ -1459,7 +1518,19 @@ class ModelBuilder:
         for k, v in faces.items():
             self.add_triangle(v[0], v[1], v[2])
 
-    def add_soft_mesh(self, pos: Vec3, rot: Quat, scale: float, vel: Vec3, vertices: List[Vec3], indices: List[int], density: float, k_mu: float, k_lambda: float, k_damp: float):
+    def add_soft_mesh(
+        self,
+        pos: Vec3,
+        rot: Quat,
+        scale: float,
+        vel: Vec3,
+        vertices: List[Vec3],
+        indices: List[int],
+        density: float,
+        k_mu: float,
+        k_lambda: float,
+        k_damp: float,
+    ):
         """Helper to create a tetrahedral model from an input tetrahedral mesh
 
         Args:
@@ -1507,7 +1578,7 @@ class ModelBuilder:
             volume = self.add_tetrahedron(v0, v1, v2, v3, k_mu, k_lambda, k_damp)
 
             # distribute volume fraction to particles
-            if (volume > 0.0):
+            if volume > 0.0:
 
                 self.particle_mass[v0] += density * volume / 4.0
                 self.particle_mass[v1] += density * volume / 4.0
@@ -1601,32 +1672,31 @@ class ModelBuilder:
         return (m, I)
 
     def _compute_shape_mass(self, type, scale, src, density):
-      
-        if density == 0:     # zero density means fixed
+
+        if density == 0:  # zero density means fixed
             return 0, np.zeros((3, 3))
 
-        if (type == GEO_SPHERE):
+        if type == GEO_SPHERE:
             return self.compute_sphere_inertia(density, scale[0])
-        elif (type == GEO_BOX):
+        elif type == GEO_BOX:
             return self.compute_box_inertia(density, scale[0] * 2.0, scale[1] * 2.0, scale[2] * 2.0)
-        elif (type == GEO_CAPSULE):
+        elif type == GEO_CAPSULE:
             return self.compute_capsule_inertia(density, scale[0], scale[1] * 2.0)
-        elif (type == GEO_MESH):
-            #todo: non-uniform scale of inertia tensor
-            s = scale[0]     # eventually want to compute moment of inertia for mesh.
+        elif type == GEO_MESH:
+            # todo: non-uniform scale of inertia tensor
+            s = scale[0]  # eventually want to compute moment of inertia for mesh.
             return (density * src.mass * s * s * s, density * src.I * s * s * s * s * s)
 
-    
     # incrementally updates rigid body mass with additional mass and inertia expressed at a local to the body
     def _update_body_mass(self, i, m, I, p, q):
-        
-        if (i == -1):
+
+        if i == -1:
             return
-            
+
         # find new COM
         new_mass = self.body_mass[i] + m
 
-        if new_mass == 0.0:    # no mass
+        if new_mass == 0.0:  # no mass
             return
 
         new_com = (self.body_com[i] * self.body_mass[i] + p * m) / new_mass
@@ -1635,8 +1705,9 @@ class ModelBuilder:
         com_offset = new_com - self.body_com[i]
         shape_offset = new_com - p
 
-        new_inertia = transform_inertia(self.body_mass[i], self.body_inertia[i], com_offset, quat_identity()) + transform_inertia(
-            m, I, shape_offset, q)
+        new_inertia = transform_inertia(
+            self.body_mass[i], self.body_inertia[i], com_offset, quat_identity()
+        ) + transform_inertia(m, I, shape_offset, q)
 
         self.body_mass[i] = new_mass
         self.body_inertia[i] = new_inertia
@@ -1660,38 +1731,40 @@ class ModelBuilder:
         # construct particle inv masses
         particle_inv_mass = []
         for m in self.particle_mass:
-            if (m > 0.0):
+            if m > 0.0:
                 particle_inv_mass.append(1.0 / m)
             else:
                 particle_inv_mass.append(0.0)
 
-        #-------------------------------------
+        # -------------------------------------
         # construct Model (non-time varying) data
 
         m = Model(adapter)
 
-        #---------------------        
+        # ---------------------
         # particles
 
         # state (initial)
         m.particle_q = torch.tensor(self.particle_q, dtype=torch.float32, device=adapter)
         m.particle_qd = torch.tensor(self.particle_qd, dtype=torch.float32, device=adapter)
 
-        # model 
+        # model
         m.particle_mass = torch.tensor(self.particle_mass, dtype=torch.float32, device=adapter)
         m.particle_inv_mass = torch.tensor(particle_inv_mass, dtype=torch.float32, device=adapter)
 
-        #---------------------
+        # ---------------------
         # collision geometry
 
-        m.shape_transform = torch.tensor(transform_flatten_list(self.shape_transform), dtype=torch.float32, device=adapter)
+        m.shape_transform = torch.tensor(
+            transform_flatten_list(self.shape_transform), dtype=torch.float32, device=adapter
+        )
         m.shape_body = torch.tensor(self.shape_body, dtype=torch.int32, device=adapter)
         m.shape_geo_type = torch.tensor(self.shape_geo_type, dtype=torch.int32, device=adapter)
         m.shape_geo_src = self.shape_geo_src
         m.shape_geo_scale = torch.tensor(self.shape_geo_scale, dtype=torch.float32, device=adapter)
         m.shape_materials = torch.tensor(self.shape_materials, dtype=torch.float32, device=adapter)
 
-        #---------------------
+        # ---------------------
         # springs
 
         m.spring_indices = torch.tensor(self.spring_indices, dtype=torch.int32, device=adapter)
@@ -1700,20 +1773,20 @@ class ModelBuilder:
         m.spring_damping = torch.tensor(self.spring_damping, dtype=torch.float32, device=adapter)
         m.spring_control = torch.tensor(self.spring_control, dtype=torch.float32, device=adapter)
 
-        #---------------------
+        # ---------------------
         # triangles
 
         m.tri_indices = torch.tensor(self.tri_indices, dtype=torch.int32, device=adapter)
         m.tri_poses = torch.tensor(self.tri_poses, dtype=torch.float32, device=adapter)
         m.tri_activations = torch.tensor(self.tri_activations, dtype=torch.float32, device=adapter)
 
-        #---------------------
+        # ---------------------
         # edges
 
         m.edge_indices = torch.tensor(self.edge_indices, dtype=torch.int32, device=adapter)
         m.edge_rest_angle = torch.tensor(self.edge_rest_angle, dtype=torch.float32, device=adapter)
 
-        #---------------------
+        # ---------------------
         # tetrahedra
 
         m.tet_indices = torch.tensor(self.tet_indices, dtype=torch.int32, device=adapter)
@@ -1721,7 +1794,7 @@ class ModelBuilder:
         m.tet_activations = torch.tensor(self.tet_activations, dtype=torch.float32, device=adapter)
         m.tet_materials = torch.tensor(self.tet_materials, dtype=torch.float32, device=adapter)
 
-        #-----------------------
+        # -----------------------
         # muscles
 
         muscle_count = len(self.muscle_start)
@@ -1735,19 +1808,18 @@ class ModelBuilder:
         m.muscle_points = torch.tensor(self.muscle_points, dtype=torch.float32, device=adapter)
         m.muscle_activation = torch.tensor(self.muscle_activation, dtype=torch.float32, device=adapter)
 
-        #--------------------------------------
+        # --------------------------------------
         # articulations
 
         # build 6x6 spatial inertia and COM transform
         body_X_cm = []
-        body_I_m = [] 
+        body_I_m = []
 
         for i in range(len(self.body_inertia)):
             body_I_m.append(spatial_matrix_from_inertia(self.body_inertia[i], self.body_mass[i]))
             body_X_cm.append(transform(self.body_com[i], quat_identity()))
-        
-        m.body_I_m = torch.tensor(body_I_m, dtype=torch.float32, device=adapter)
 
+        m.body_I_m = torch.tensor(body_I_m, dtype=torch.float32, device=adapter)
 
         articulation_count = len(self.articulation_start)
         joint_coord_count = len(self.joint_q)
@@ -1756,7 +1828,7 @@ class ModelBuilder:
         # 'close' the start index arrays with a sentinel value
         self.joint_q_start.append(len(self.joint_q))
         self.joint_qd_start.append(len(self.joint_qd))
-        self.articulation_start.append(len(self.joint_type))        
+        self.articulation_start.append(len(self.joint_type))
 
         # calculate total size and offsets of Jacobian and mass matrices for entire system
         m.J_size = 0
@@ -1778,7 +1850,7 @@ class ModelBuilder:
         for i in range(articulation_count):
 
             first_joint = self.articulation_start[i]
-            last_joint = self.articulation_start[i+1]
+            last_joint = self.articulation_start[i + 1]
 
             first_coord = self.joint_q_start[first_joint]
             last_coord = self.joint_q_start[last_joint]
@@ -1786,9 +1858,9 @@ class ModelBuilder:
             first_dof = self.joint_qd_start[first_joint]
             last_dof = self.joint_qd_start[last_joint]
 
-            joint_count = last_joint-first_joint
-            dof_count = last_dof-first_dof
-            coord_count = last_coord-first_coord
+            joint_count = last_joint - first_joint
+            dof_count = last_dof - first_dof
+            coord_count = last_coord - first_coord
 
             articulation_J_start.append(m.J_size)
             articulation_M_start.append(m.M_size)
@@ -1797,15 +1869,14 @@ class ModelBuilder:
             articulation_coord_start.append(first_coord)
 
             # bit of data duplication here, but will leave it as such for clarity
-            articulation_M_rows.append(joint_count*6)
+            articulation_M_rows.append(joint_count * 6)
             articulation_H_rows.append(dof_count)
-            articulation_J_rows.append(joint_count*6)
+            articulation_J_rows.append(joint_count * 6)
             articulation_J_cols.append(dof_count)
 
-            m.J_size += 6*joint_count*dof_count
-            m.M_size += 6*joint_count*6*joint_count
-            m.H_size += dof_count*dof_count
-            
+            m.J_size += 6 * joint_count * dof_count
+            m.M_size += 6 * joint_count * 6 * joint_count
+            m.H_size += dof_count * dof_count
 
         m.articulation_joint_start = torch.tensor(self.articulation_start, dtype=torch.int32, device=adapter)
 
@@ -1813,7 +1884,7 @@ class ModelBuilder:
         m.articulation_J_start = torch.tensor(articulation_J_start, dtype=torch.int32, device=adapter)
         m.articulation_M_start = torch.tensor(articulation_M_start, dtype=torch.int32, device=adapter)
         m.articulation_H_start = torch.tensor(articulation_H_start, dtype=torch.int32, device=adapter)
-        
+
         m.articulation_M_rows = torch.tensor(articulation_M_rows, dtype=torch.int32, device=adapter)
         m.articulation_H_rows = torch.tensor(articulation_H_rows, dtype=torch.int32, device=adapter)
         m.articulation_J_rows = torch.tensor(articulation_J_rows, dtype=torch.int32, device=adapter)
@@ -1832,12 +1903,12 @@ class ModelBuilder:
         m.joint_X_pj = torch.tensor(transform_flatten_list(self.joint_X_pj), dtype=torch.float32, device=adapter)
         m.joint_X_cm = torch.tensor(transform_flatten_list(body_X_cm), dtype=torch.float32, device=adapter)
         m.joint_axis = torch.tensor(self.joint_axis, dtype=torch.float32, device=adapter)
-        m.joint_q_start = torch.tensor(self.joint_q_start, dtype=torch.int32, device=adapter) 
+        m.joint_q_start = torch.tensor(self.joint_q_start, dtype=torch.int32, device=adapter)
         m.joint_qd_start = torch.tensor(self.joint_qd_start, dtype=torch.int32, device=adapter)
 
         # dynamics properties
         m.joint_armature = torch.tensor(self.joint_armature, dtype=torch.float32, device=adapter)
-        
+
         m.joint_target = torch.tensor(self.joint_target, dtype=torch.float32, device=adapter)
         m.joint_target_ke = torch.tensor(self.joint_target_ke, dtype=torch.float32, device=adapter)
         m.joint_target_kd = torch.tensor(self.joint_target_kd, dtype=torch.float32, device=adapter)
@@ -1855,14 +1926,14 @@ class ModelBuilder:
         m.joint_dof_count = joint_dof_count
         m.muscle_count = muscle_count
 
-        m.link_count = len(self.joint_type)        
+        m.link_count = len(self.joint_type)
         m.shape_count = len(self.shape_geo_type)
         m.tri_count = len(self.tri_poses)
         m.tet_count = len(self.tet_poses)
         m.edge_count = len(self.edge_rest_angle)
         m.spring_count = len(self.spring_rest_length)
         m.contact_count = 0
-        
+
         # store refs to geometry
         m.geo_meshes = self.geo_meshes
         m.geo_sdfs = self.geo_sdfs

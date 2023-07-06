@@ -1,4 +1,4 @@
-name: df_cartpole
+name: df_cartpole_swing_up
 env_name: CartPoleSwingUpEnv
 
 config:

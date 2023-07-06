@@ -18,11 +18,9 @@ from rl_games.common import schedulers
 from rl_games.algos_torch import torch_ext
 from shac.utils.average_meter import AverageMeter
 from shac.utils.common import *
-from shac.utils.dataset import QCriticDataset
+from shac.utils.dataset import QCriticDataset, CriticDataset
 from shac.utils.running_mean_std import RunningMeanStd
 from shac.utils.time_report import TimeReport
-from shac.models import actor as actor_models
-from shac.models import critic as critic_model
 import shac.utils.torch_utils as tu
 from tensorboardX import SummaryWriter
 import torch.distributed as dist
@@ -38,7 +36,7 @@ class SHAC:
 
     def __init__(self, cfg: DictConfig):
         seeding(cfg.general.seed)
-        self.env = instantiate(cfg.env.config)
+        self.env = instantiate(cfg.task.env, _convert_='partial')
 
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
@@ -73,8 +71,8 @@ class SHAC:
 
         self.steps_num = cfg.alg.params.config.steps_num
         self.max_epochs = cfg.alg.params.config.max_epochs
-        self.actor_lr = float(cfg.env.shac2.actor_lr)
-        self.critic_lr = float(cfg.env.shac2.critic_lr)
+        self.actor_lr = float(cfg.task.shac2.actor_lr)
+        self.critic_lr = float(cfg.task.shac2.critic_lr)
         self.lr_schedule = cfg.alg.params.config.lr_schedule
 
         self.is_adaptive_lr = self.lr_schedule == "adaptive"
@@ -114,6 +112,8 @@ class SHAC:
 
         self.truncate_grad = cfg.alg.params.config.truncate_grads
         self.grad_norm = cfg.alg.params.config.grad_norm
+        self.contact_truncation = cfg.alg.params.config.contact_truncation
+        self.min_steps = 4
 
         if cfg.general.train:
             self.log_dir = cfg.general.logdir
@@ -137,12 +137,28 @@ class SHAC:
             action_dim=self.num_actions,
             device=self.device,
         )
-        self.critic = instantiate(
-            cfg.alg.params.network.critic,
-            obs_dim=self.num_obs,
-            action_dim=self.num_actions,
-            device=self.device,
-        )
+
+        self.critic_name = cfg.alg.params.network.critic_name
+        if self.critic_name == "q_network":
+            self.critic = instantiate(
+                cfg.alg.params.network.critic,
+                input_size=self.num_obs + self.num_actions,
+                device=self.device,
+            )
+        elif self.critic_name == "value_network":
+            self.critic = instantiate(
+                cfg.alg.params.network.critic,
+                obs_dim=self.num_obs,
+                device=self.device,
+            )
+        elif self.critic_name == "double_q_network":
+            self.critic = instantiate(
+                cfg.alg.params.network.critic,
+                input_size=self.num_obs + self.num_actions,
+                dense_func=torch.nn.Linear,
+                output_dim=1,
+            ).to(self.device)
+
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
@@ -234,9 +250,9 @@ class SHAC:
         rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
-        # next_values_model_free = torch.zeros(
-        #     (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
-        # )
+        next_values_model_free = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
         # actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
@@ -263,7 +279,6 @@ class SHAC:
             self.old_sigmas[:] = self.sigmas.clone()
 
         self.ep_kls = []
-        next_actions = torch.tanh(self.actor(obs, deterministic=deterministic))
 
         for i in range(self.steps_num):
             # collect data for critic training
@@ -271,7 +286,7 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             # normalized sampled action: pi(s)
-            actions = next_actions
+            actions = torch.tanh(self.actor(obs, deterministic=deterministic))
 
             with torch.no_grad():
                 self.act_buf[i] = actions.clone()
@@ -305,45 +320,78 @@ class SHAC:
 
             self.episode_length += 1
 
-            # done = done.clone() | extra_info.get("contact_changed", torch.zeros_like(done))
-            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+            trunc = extra_info.get("contact_changed", torch.zeros_like(done))
+            is_done = done.clone()
+            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
+
+            if self.contact_truncation:
+                is_done = is_done | trunc
+                trunc_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
+            else:
+                trunc_env_ids = done_env_ids
 
             next_actions = torch.tanh(self.actor(obs, deterministic=True))
-            next_values[i + 1] = self.target_critic(obs, next_actions).squeeze(-1)
-            # next_values_model_free[i + 1] = self.target_critic(obs.detach(), next_actions.detach()).squeeze(-1)
-            # next_values_model_free[i + 1] = torch.minimum(
-            #     self.critic(obs.requires_grad_(False), actions).squeeze(-1),
-            #     self.target_critic(obs.require_grad_(False), actions).squeeze(-1),
-            # )
+            if self.critic_name == "q_network":
+                val = self.target_critic(obs, next_actions).squeeze(-1)
+                val_model_free = self.target_critic(obs.detach(), next_actions).squeeze(-1)
+            elif self.critic_name == "double_q_network":
+                val = torch.minimum(*self.target_critic(obs, next_actions)).squeeze(-1)
+                val_model_free = torch.minimum(*self.target_critic(obs.detach(), next_actions)).squeeze(-1)
+            elif self.critic_name == "value_network":
+                val = self.target_critic(obs).squeeze(-1)
+                val_model_free = self.target_critic(obs.detach()).squeeze(-1)
+            next_values[i + 1] = val
+            next_values_model_free[i + 1] = val_model_free
 
             # zero next_values for done envs with inf, nan, or >1e6 values in obs_before_reset
             # or early termination
 
-            if done_env_ids.shape[0] > 0:
-                zero_next_values = torch.where(
-                    torch.isnan(extra_info["obs_before_reset"][done_env_ids]).any(dim=-1)
-                    | torch.isinf(extra_info["obs_before_reset"][done_env_ids]).any(dim=-1)
-                    | (torch.abs(extra_info["obs_before_reset"][done_env_ids]) > 1e6).any(dim=-1)
-                    | (self.episode_length[done_env_ids] < self.max_episode_length),
-                    torch.ones_like(done_env_ids, dtype=bool),
-                    torch.zeros_like(done_env_ids, dtype=bool),
-                )
-                zero_next_values, assign_next_values = done_env_ids[zero_next_values], done_env_ids[~zero_next_values]
-                if zero_next_values.shape[0] > 0:
-                    next_values[i + 1, zero_next_values] = 0.0
-                    # next_values_model_free[i + 1, zero_next_values] = 0.0
-                # use terminal value critic to estimate the long-term performance
-                if assign_next_values.shape[0] > 0:
+            # if done_env_ids.shape[0] > 0:
+            #     zero_next_values = torch.where(
+            #         torch.isnan(extra_info["obs_before_reset"][done_env_ids]).any(dim=-1)
+            #         | torch.isinf(extra_info["obs_before_reset"][done_env_ids]).any(dim=-1)
+            #         | (torch.abs(extra_info["obs_before_reset"][done_env_ids]) > 1e6).any(dim=-1)
+            #         | (self.episode_length[done_env_ids] < self.max_episode_length),
+            #         torch.ones_like(done_env_ids, dtype=bool),
+            #         torch.zeros_like(done_env_ids, dtype=bool),
+            #     )
+            #     zero_next_values, assign_next_values = done_env_ids[zero_next_values], done_env_ids[~zero_next_values]
+            #     if zero_next_values.shape[0] > 0:
+            #         next_values[i + 1, zero_next_values] = 0.0
+            #         next_values_model_free[i + 1, zero_next_values] = 0.0
+            #     # use terminal value critic to estimate the long-term performance
+            #     if assign_next_values.shape[0] > 0:
+            #         if self.obs_rms is not None:
+            #             real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
+            #         else:
+            #             real_obs = extra_info["obs_before_reset"][assign_next_values]
+            #         real_act = torch.tanh(self.actor(real_obs, deterministic=True))
+            #         next_values[i + 1, assign_next_values] = torch.minimum(*self.critic(real_obs, real_act)).squeeze(-1)
+            #         next_values_model_free[i + 1, assign_next_values] = torch.minimum(
+            #             *self.critic(real_obs.detach(), real_act)
+            #         ).squeeze(-1)
+
+            for id in done_env_ids:
+                if (
+                    torch.isnan(extra_info["obs_before_reset"][id]).sum() > 0
+                    or torch.isinf(extra_info["obs_before_reset"][id]).sum() > 0
+                    or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
+                ):  # ugly fix for nan values
+                    next_values[i + 1, id] = 0.0
+                elif self.episode_length[id] < self.max_episode_length:
+                    next_values[i + 1, id] = 0.0
+                else:  # otherwise, use terminal value critic to estimate the long-term performance
                     if self.obs_rms is not None:
-                        real_obs = obs_rms.normalize(extra_info["obs_before_reset"][assign_next_values])
-                        real_act = actions[assign_next_values]
+                        real_obs = obs_rms.normalize(extra_info["obs_before_reset"][id])
                     else:
-                        real_obs = extra_info["obs_before_reset"][assign_next_values]
-                        real_act = actions[assign_next_values]
-                    next_values[i + 1, assign_next_values] = self.critic(real_obs, real_act).squeeze(-1)
-                    # next_values_model_free[i + 1, assign_next_values] = self.critic(
-                    #     real_obs.detach(), real_actions
-                    # ).squeeze(-1)
+                        real_obs = extra_info["obs_before_reset"][id]
+
+                    if self.critic_name == "CriticMLP":
+                        next_values[i + 1, id] = self.target_critic(real_obs).squeeze(-1)
+                    else:
+                        real_act = torch.tanh(self.actor(real_obs, deterministic=True))
+                        next_values[i + 1, id] = self.target_critic(real_obs, real_act).squeeze(-1)
+
             if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
                 print("next value error")
                 if self.multi_gpu:
@@ -352,27 +400,43 @@ class SHAC:
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
+            # if i < self.steps_num - 1:
+            #     if len(done_env_ids) > 0 and (self.rollout_lens[done_env_ids] >= self.min_steps).any():
+            #         done_steps = self.rollout_lens[done_env_ids] >= self.min_steps
+            #
+            #         next_value = torch.where(
+            #             done_steps,
+            #             next_values_model_free[i + 1, done_env_ids],
+            #             next_values[i + 1, done_env_ids],
+            #         )
+            #     else:
+            #         next_value = next_values[i + 1, done_env_ids]
+            #     actor_loss += (-rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_value).sum()
+            #     # actor_model_free_loss += (
+            #     #     -rew_acc[i + 1, done_env_ids].detach()
+            #     #     - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
+            #     # ).sum()
+            # else:
+            #     # terminate all envs at the end of optimization iteration
+            #     actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
+            #     # actor_model_free_loss += (
+            #     #     -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
+            #     # ).sum()
+
             if i < self.steps_num - 1:
                 actor_loss += (
                     -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
                 ).sum()
-                # actor_model_free_loss += (
-                #     -rew_acc[i + 1, done_env_ids].detach()
-                #     - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
-                # ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
                 actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
-                # actor_model_free_loss += (
-                #     -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
-                # ).sum()
 
             # compute gamma for next step
             gamma = gamma * self.gamma
 
             # clear up gamma and rew_acc for done envs
-            gamma[done_env_ids] = 1.0
-            rew_acc[i + 1, done_env_ids] = 0.0
+            gamma[trunc_env_ids] = 1.0
+            rew_acc[i + 1, trunc_env_ids] = 0.0
 
             # collect data for critic training
             with torch.no_grad():
@@ -421,11 +485,19 @@ class SHAC:
             # actor_model_free_loss = actor_model_free_loss * torch.sqrt(ret_var + 1e-6)
 
         self.actor_loss = actor_loss.detach().cpu().item()
-        # self.actor_model_free_loss = actor_loss.detach().cpu().item()
+        # self.actor_model_free_loss = actor_model_free_loss.detach().cpu().item()
 
         self.step_count += self.steps_num * self.num_envs
 
-        return actor_loss, None
+        rew_acc_ = rew_acc.detach().cpu().numpy()
+        rollout_lens = np.array([])
+        for j in range(rew_acc_.shape[1]):
+            idx = np.argwhere(rew_acc_[:, j] == 0.0)
+            idx = np.append(idx, len(rew_acc_) - 1)
+            rollout_lens = np.append(rollout_lens, np.diff(idx))
+        # rollout_lens is a 1D array of lenghts of each rollout
+        self.rollout_lens = tu.to_torch(rollout_lens, dtype=float)
+        return actor_loss
 
     @torch.no_grad()
     def evaluate_policy(self, num_games, deterministic=False):
@@ -502,9 +574,16 @@ class SHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        predicted_values = self.critic(batch_sample["obs"], batch_sample["act"]).squeeze(-1)
         target_values = batch_sample["target_values"]
-        critic_loss = ((predicted_values - target_values) ** 2).mean()
+        if self.critic_name == "double_q_network":
+            q1, q2 = self.critic(batch_sample["obs"], batch_sample["act"])
+            critic_loss = ((q1 - target_values) ** 2).mean() + ((q2 - target_values) ** 2).mean()
+        elif self.critic_name == "q_network":
+            q = self.critic(batch_sample["obs"], batch_sample["act"])
+            critic_loss = ((q - target_values) ** 2).mean()
+        elif self.critic_name == "value_network":
+            v = self.critic(batch_sample["obs"])
+            critic_loss = ((v - target_values) ** 2).mean()
 
         return critic_loss
 
@@ -560,6 +639,7 @@ class SHAC:
         self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
+        self.rollout_lens = torch.zeros(self.num_envs, dtype=float, device=self.device)
         self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
 
         def actor_closure():
@@ -571,7 +651,7 @@ class SHAC:
 
             # use autoscaling for mixed precision
             with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-                actor_loss, _ = self.compute_actor_loss()
+                actor_loss = self.compute_actor_loss()
             self.time_report.end_timer("forward simulation")
 
             self.time_report.start_timer("backward simulation")
@@ -658,13 +738,16 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                dataset = QCriticDataset(
-                    self.batch_size,
-                    self.obs_buf,
-                    self.act_buf,
-                    self.target_values,
-                    drop_last=False,
-                )
+                if self.critic_name == "value_network":
+                    dataset = CriticDataset(self.batch_size, self.obs_buf, self.target_values, drop_last=False)
+                else:
+                    dataset = QCriticDataset(
+                        self.batch_size,
+                        self.obs_buf,
+                        self.act_buf,
+                        self.target_values,
+                        drop_last=False,
+                    )
                 # compute KL divergence of the current policy
                 self.ep_kls.append(
                     torch_ext.policy_kl(
@@ -782,7 +865,11 @@ class SHAC:
                 self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
                 self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
                 self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
+                rollout_len_mean = self.rollout_lens.mean().cpu().item()
+                self.writer.add_scalar("rollout_len/step", rollout_len_mean, self.step_count)
+                self.writer.add_scalar("rollout_len/iter", rollout_len_mean, self.iter_count)
             else:
+                rollout_len_mean = self.rollout_lens.mean().cpu().item()
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
                 mean_episode_length = 0
@@ -790,10 +877,11 @@ class SHAC:
             self.writer.flush()
 
             print(
-                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {}: ep loss {:.2f}, ep discounted loss {:.2f}, rollout len {:.1f}, ep len {:.1f}, fps total {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
                     self.iter_count,
                     mean_policy_loss,
                     mean_policy_discounted_loss,
+                    rollout_len_mean,
                     mean_episode_length,
                     self.steps_num * self.num_envs * self.rank_size / (time_end_epoch - time_start_epoch),
                     self.value_loss,

@@ -14,6 +14,11 @@ from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
 
+from warp.envs.obj_env import ObjectTask
+from warp.envs.hand_env import HandObjectTask
+from warp.envs.repose_task import ReposeTask
+from warp.envs.articulate_task import ArticulateTask
+
 # dmanip envs
 try:
     from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv

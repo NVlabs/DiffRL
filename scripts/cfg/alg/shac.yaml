@@ -34,7 +34,8 @@ params:
     truncate_grads: True
     num_actors: ${env.config.num_envs} # ${resolve_default:64,${..env.config.num_envs}}
     save_interval: 400 # ${resolve_default:400,${..env.save_interval}}
-    contact_theshold: 150
+    contact_truncation: False
+    min_steps_before_truncation: 4
 
     player:
       determenistic: True

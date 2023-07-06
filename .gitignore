@@ -12,3 +12,7 @@ dflex/dflex/kernels*/
 **.egg-info/
 
 wandb/
+checkpoints/
+multirun/
+
+scripts/sweeps/

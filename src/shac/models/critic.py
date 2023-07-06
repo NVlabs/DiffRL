@@ -10,6 +10,17 @@ import torch.nn as nn
 import numpy as np
 
 from shac.models import model_utils
+from rl_games.algos_torch.network_builder import DoubleQCritic
+
+
+def DoubleQCriticMLP(input_size, cfg_network, device="cuda:0"):
+    units = cfg_network["critic_mlp"]["units"]
+    activation = cfg_network["critic_mlp"]["activation"]
+    critic = DoubleQCritic(1, input_size=input_size, units=units, activation=activation, dense_func=torch.nn.Linear).to(
+        device
+    )
+    print(critic)
+    return critic
 
 
 class CriticMLP(nn.Module):
@@ -40,12 +51,12 @@ class CriticMLP(nn.Module):
 
 
 class QCriticMLP(nn.Module):
-    def __init__(self, obs_dim, action_dim, cfg_network, device="cuda:0"):
+    def __init__(self, input_size, cfg_network, device="cuda:0"):
         super(QCriticMLP, self).__init__()
 
         self.device = device
 
-        self.layer_dims = [obs_dim + action_dim] + cfg_network["critic_mlp"]["units"] + [1]
+        self.layer_dims = [input_size] + cfg_network["critic_mlp"]["units"] + [1]
 
         init_ = lambda m: model_utils.init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), np.sqrt(2))
 
@@ -57,9 +68,6 @@ class QCriticMLP(nn.Module):
                 modules.append(torch.nn.LayerNorm(self.layer_dims[i + 1]))
 
         self.q_function = nn.Sequential(*modules).to(device)
-
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
 
         print(self.q_function)
 
