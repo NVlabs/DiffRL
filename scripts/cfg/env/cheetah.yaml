@@ -25,7 +25,7 @@ ppo:
   minibatch_size: 1920
   save_interval: 100
   save_best_after: 50
-  num_actors: 32
+  num_actors: 1024
   steps_num: 240
 
 player:

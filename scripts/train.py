@@ -3,6 +3,7 @@ import hydra, os, wandb, yaml
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
 from shac.utils import hydra_utils
+from hydra.utils import instantiate
 from shac.algorithms.shac import SHAC
 from shac.algorithms.shac2 import SHAC as SHAC2
 from shac.algorithms.ahac import AHAC
@@ -18,21 +19,10 @@ from rl_games.torch_runner import Runner
 from rl_games.common import env_configurations, vecenv
 
 
-def register_envs(cfg_train):
+def register_envs(env_config):
     def create_dflex_env(**kwargs):
-        env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
-
-        env = env_fn(
-            num_envs=cfg_train["params"]["config"]["num_actors"],
-            render=cfg_train["params"]["general"]["render"],
-            seed=cfg_train["params"]["general"]["seed"],
-            episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
-            no_grad=True,
-            stochastic_init=cfg_train["params"]["diff_env"]["stochastic_init"],
-            MM_caching_frequency=cfg_train["params"]["diff_env"].get(
-                "MM_caching_frequency", 1
-            ),
-        )
+        # create env without grads since PPO doesn't need them
+        env = instantiate(env_config.config, no_grad=True)
 
         print("num_envs = ", env.num_envs)
         print("num_actions = ", env.num_actions)
@@ -45,18 +35,8 @@ def register_envs(cfg_train):
         return env
 
     def create_warp_env(**kwargs):
-        env_fn = getattr(envs, cfg_train["params"]["diff_env"]["name"])
-        env_kwargs = parse_diff_env_kwargs(cfg_train["params"]["diff_env"])
-
-        env = env_fn(
-            num_envs=cfg_train["params"]["config"]["num_actors"],
-            render=cfg_train["params"]["general"]["render"],
-            seed=cfg_train["params"]["general"]["seed"],
-            episode_length=cfg_train["params"]["diff_env"].get("episode_length", 1000),
-            no_grad=True,
-            stochastic_init=cfg_train["params"]["diff_env"]["stochastic_init"],
-            **env_kwargs,
-        )
+        # create env without grads since PPO doesn't need them
+        env = instantiate(env_config.config, no_grad=True)
 
         print("num_envs = ", env.num_envs)
         print("num_actions = ", env.num_actions)
@@ -110,6 +90,7 @@ def create_wandb_run(wandb_cfg, job_config, run_id=None, run_wandb=False):
             project=wandb_cfg.project,
             config=job_config,
             group=wandb_cfg.group,
+            entity=wandb_cfg.entity,
             sync_tensorboard=True,
             monitor_gym=True,
             save_code=True,
@@ -127,91 +108,28 @@ cfg_path = os.path.join(cfg_path, "cfg")
 @hydra.main(config_path="cfg", config_name="config.yaml")
 def train(cfg: DictConfig):
     try:
-        cfg_full = OmegaConf.to_container(cfg, resolve=True)
-        cfg_yaml = yaml.dump(cfg_full["alg"])
-
-        resume_model = cfg.resume_model
-        if os.path.exists("exp_config.yaml"):
-            old_config = yaml.load(open("exp_config.yaml", "r"))
-            params, wandb_id = old_config["params"], old_config["wandb_id"]
-            run = create_wandb_run(
-                cfg.wandb, params, wandb_id, run_wandb=cfg.general.run_wandb
-            )
-            resume_model = "restore_checkpoint.zip"
-            assert os.path.exists(
-                resume_model
-            ), "restore_checkpoint.zip does not exist!"
-        else:
-            defaults = HydraConfig.get().runtime.choices
-
-            params = yaml.safe_load(cfg_yaml)
-            params["defaults"] = {k: defaults[k] for k in ["alg"]}
-
-            run = create_wandb_run(cfg.wandb, params, run_wandb=cfg.general.run_wandb)
-            # wandb_id = run.id if run != None else None
-            save_dict = dict(wandb_id=run.id if run != None else None, params=params)
-            yaml.dump(save_dict, open("exp_config.yaml", "w"))
-            print("Config:")
-            print(cfg_yaml)
+        cfg_full: OmegaConf = OmegaConf.to_container(cfg, resolve=True)
+        run = create_wandb_run(cfg.wandb, cfg_full, run_wandb=cfg.general.run_wandb)
 
         if "hac" in cfg.alg.name:
-            if cfg.alg.name == "shac":
-                cfg_train = cfg_full["alg"]
-                if cfg.general.play:
-                    cfg_train["params"]["config"]["num_actors"] = (
-                        cfg_train["params"]["config"]
-                        .get("player", {})
-                        .get("num_actors", 1)
-                    )
-                if not cfg.general.no_time_stamp:
-                    cfg.general.logdir = os.path.join(
-                        cfg.general.logdir, get_time_stamp()
-                    )
+            cfg_train = cfg_full["alg"]
+            if cfg.general.play:
+                cfg_train["params"]["config"]["num_actors"] = (
+                    cfg_train["params"]["config"].get("player", {}).get("num_actors", 1)
+                )
+            if not cfg.general.no_time_stamp:
+                cfg.general.logdir = os.path.join(cfg.general.logdir, get_time_stamp())
 
-                cfg_train["params"]["general"] = cfg_full["general"]
-                cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
-                env_name = cfg_train["params"]["diff_env"].pop("_target_")
-                cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
-                print(cfg_train["params"]["general"])
+            cfg_train["params"]["general"] = cfg_full["general"]
+            cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+            env_name = cfg_train["params"]["diff_env"].pop("_target_")
+            cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
+            print(cfg_train["params"]["general"])
+            if cfg.alg.name == "shac":
                 traj_optimizer = SHAC(cfg_train)
             elif cfg.alg.name == "shac2":
-                cfg_train = cfg_full["alg"]
-                if cfg.general.play:
-                    cfg_train["params"]["config"]["num_actors"] = (
-                        cfg_train["params"]["config"]
-                        .get("player", {})
-                        .get("num_actors", 1)
-                    )
-                if not cfg.general.no_time_stamp:
-                    cfg.general.logdir = os.path.join(
-                        cfg.general.logdir, get_time_stamp()
-                    )
-
-                cfg_train["params"]["general"] = cfg_full["general"]
-                cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
-                env_name = cfg_train["params"]["diff_env"].pop("_target_")
-                cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
-                print(cfg_train["params"]["general"])
                 traj_optimizer = SHAC2(cfg_train)
             elif cfg.alg.name == "ahac":
-                print("running AHAC!")
-                cfg_train = cfg_full["alg"]
-                if cfg.general.play:
-                    cfg_train["params"]["config"]["num_actors"] = (
-                        cfg_train["params"]["config"]
-                        .get("player", {})
-                        .get("num_actors", 1)
-                    )
-                if not cfg.general.no_time_stamp:
-                    cfg.general.logdir = os.path.join(
-                        cfg.general.logdir, get_time_stamp()
-                    )
-
-                cfg_train["params"]["general"] = cfg_full["general"]
-                cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
-                env_name = cfg_train["params"]["diff_env"].pop("_target_")
-                cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
-                print(cfg_train["params"]["general"])
                 traj_optimizer = AHAC(cfg_train)
             else:
                 raise NotImplementedError
@@ -222,15 +140,21 @@ def train(cfg: DictConfig):
                 traj_optimizer.play(cfg_train)
             wandb.finish()
         elif cfg.alg.name == "ppo":
+            # to set up RL games we have to do a bunch of config menipulation
+            # which makes it a huge mess...
+
+            # first shuffle around config structure
             cfg_train = cfg_full["alg"]
             cfg_train["params"]["general"] = cfg_full["general"]
             env_name = cfg_train["params"]["config"]["env_name"]
             cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+
+            # Now handle different env instantiation
             if env_name.split("_")[0] == "df":
                 cfg_train["params"]["config"]["env_name"] = "dflex"
             elif env_name.split("_")[0] == "warp":
                 cfg_train["params"]["config"]["env_name"] = "warp"
-            env_name = cfg_train["params"]["diff_env"].pop("_target_")
+            env_name = cfg_train["params"]["diff_env"]["_target_"]
             cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
 
             # save config
@@ -240,8 +164,9 @@ def train(cfg: DictConfig):
                 # save config
                 yaml.dump(cfg_train, open(os.path.join(log_dir, "cfg.yaml"), "w"))
 
-            # register envs
-            register_envs(cfg_train)
+            # register envs with the correct number of actors for PPO
+            cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+            register_envs(cfg.env)
 
             # add observer to score keys
             if cfg_train["params"]["config"].get("score_keys"):

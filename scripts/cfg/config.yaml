@@ -3,7 +3,6 @@ defaults:
   - env: cartpole
   - alg: shac
 
-
 hydra:
   sweep:
     dir: checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
@@ -40,14 +39,14 @@ env:
     num_actors: 4
 
   ppo:
-    max_epochs: 2000 
+    max_epochs: 2000
     minibatch_size: 1920
     save_interval: 400
     save_best_after: 100
     num_actors: 1024
     steps_num: 240
     actor_mlp:
-      units: 
+      units:
         - 128
         - 64
         - 32
@@ -78,7 +77,7 @@ env:
       - 0.7
       - 0.95
 
-  shac2:  
+  shac2:
     lambda: 0.95
     actor_mlp:
       units:
@@ -94,11 +93,12 @@ env:
     max_epochs: 2000
     save_interval: 400
     steps_num: 32
-    betas: 
+    betas:
       - 0.7
       - 0.95
 
 wandb:
   project: shac
+  entity: dmanip-rss
   group: ${exp_name}
   sweep_name_prefix: ${env.name}_${alg.name}-run
