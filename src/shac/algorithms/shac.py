@@ -69,6 +69,7 @@ class SHAC:
         self.gamma = cfg["params"]["config"].get("gamma", 0.99)
 
         self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")
+        assert self.critic_method in ["one-step", "td-lambda"]
         if self.critic_method == "td-lambda":
             self.lam = cfg["params"]["config"].get("lambda", 0.95)
 
@@ -320,9 +321,7 @@ class SHAC:
                 next_values[i + 1, id] = 0.0
 
             # sanity check
-            if (next_values[i + 1] > 1e6).sum() > 0 or (
-                next_values[i + 1] < -1e6
-            ).sum() > 0:
+            if (next_values > 1e6).sum() > 0 or (next_values < -1e6).sum() > 0:
                 print("next value error")
                 raise ValueError
 

@@ -154,7 +154,7 @@ def train(cfg: DictConfig):
             print("Config:")
             print(cfg_yaml)
 
-        if "shac" in cfg.alg.name:
+        if "hac" in cfg.alg.name:
             if cfg.alg.name == "shac":
                 cfg_train = cfg_full["alg"]
                 if cfg.general.play:
@@ -193,6 +193,29 @@ def train(cfg: DictConfig):
                 cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
                 print(cfg_train["params"]["general"])
                 traj_optimizer = SHAC2(cfg_train)
+            elif cfg.alg.name == "ahac":
+                print("running AHAC!")
+                cfg_train = cfg_full["alg"]
+                if cfg.general.play:
+                    cfg_train["params"]["config"]["num_actors"] = (
+                        cfg_train["params"]["config"]
+                        .get("player", {})
+                        .get("num_actors", 1)
+                    )
+                if not cfg.general.no_time_stamp:
+                    cfg.general.logdir = os.path.join(
+                        cfg.general.logdir, get_time_stamp()
+                    )
+
+                cfg_train["params"]["general"] = cfg_full["general"]
+                cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+                env_name = cfg_train["params"]["diff_env"].pop("_target_")
+                cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
+                print(cfg_train["params"]["general"])
+                traj_optimizer = AHAC(cfg_train)
+            else:
+                raise NotImplementedError
+
             if not cfg.general.play:
                 traj_optimizer.train()
             else:
@@ -229,6 +252,8 @@ def train(cfg: DictConfig):
             runner.load(cfg_train)
             runner.reset()
             runner.run(cfg_train["params"]["general"])
+        else:
+            raise NotImplementedError
     except:
         traceback.print_exc(file=open("exception.log", "w"))
         with open("exception.log", "r") as f:

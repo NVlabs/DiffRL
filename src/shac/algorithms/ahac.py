@@ -29,6 +29,7 @@ import yaml
 from shac import envs
 import shac.models.actor as actor_models
 import shac.models.critic as critic_models
+from shac.models.critic import CriticMLP
 from shac.utils.common import *
 import shac.utils.torch_utils as tu
 from shac.utils.running_mean_std import RunningMeanStd
@@ -77,9 +78,10 @@ class AHAC:
 
         self.gamma = cfg["params"]["config"].get("gamma", 0.99)
 
-        self.critic_method = cfg["params"]["config"]["critic_method"]
+        self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")
         assert self.critic_method in ["one-step", "td-lambda"]
-        self.lam = cfg["params"]["config"].get("lambda", 0.95)
+        if self.critic_method == "td-lambda":
+            self.lam = cfg["params"]["config"].get("lambda", 0.95)
 
         self.steps_min = cfg["params"]["config"].get("steps_min", 0)
         self.steps_num = cfg["params"]["config"]["steps_num"]
@@ -135,20 +137,18 @@ class AHAC:
             )
             self.steps_num = self.env.episode_length
 
-        self.eval_runs = cfg["params"]["config"]["player"]["games_num"]
-
         # create actor critic network
         # choices: ['ActorDeterministicMLP', 'ActorStochasticMLP']
         self.actor_name = cfg["params"]["network"].get("actor", "ActorStochasticMLP")
+        assert self.actor_name in ["ActorDeterministicMLP", "ActorStochasticMLP"]
         actor_fn = getattr(actor_models, self.actor_name)
         self.actor = actor_fn(
             self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
         )
-        self.critic_name = "CriticMLP"  # NOTE: hardcoded for future proofness
-        critic_fn = getattr(critic_models, self.critic_name)
-        self.critic = critic_fn(
+        self.critic = CriticMLP(
             self.num_obs, cfg["params"]["network"], device=self.device
         )
+
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
@@ -237,7 +237,7 @@ class AHAC:
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.done_buf = torch.zeros(self.num_envs, dtype=bool, device=self.device)
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
@@ -252,11 +252,14 @@ class AHAC:
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_discounted_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
+        self.horizon_length_meter = AverageMeter(1, 100).to(self.device)
         self.score_keys = cfg["params"]["config"].get("score_keys", [])
         self.episode_scores_meter_map = {
             key + "_final": AverageMeter(1, 100).to(self.device)
             for key in self.score_keys
         }
+
+        self.eval_runs = cfg["params"]["config"]["player"].get("games_num", 12)
 
         # timer
         self.time_report = TimeReport()
@@ -292,13 +295,14 @@ class AHAC:
 
             # act in environment
             actions = self.actor(obs, deterministic=deterministic)
-            obs, rew, term, trunc, info = self.env.step(torch.tanh(actions))
+            obs, rew, done, info = self.env.step(torch.tanh(actions))
 
-            # episode is done because we have reset the environment
-            ep_done = trunc | term
-            ep_done_env_ids = ep_done.nonzero(as_tuple=False).squeeze(-1).cpu()
+            ep_done_env_ids = done.nonzero(as_tuple=False).squeeze(-1).cpu()
+            self.done_buf = self.done_buf | done
 
-            self.done_buf = self.done_buf | ep_done
+            # split into term and trunc
+            term = done & (self.episode_length < self.max_episode_length)
+            trunc = done & (~term)
 
             if self.obs_rms is not None:
                 # update obs rms
@@ -365,10 +369,10 @@ class AHAC:
             cutoff = self.rollout_len >= self.steps_num
             if "jacobian" in info:
                 cutoff = cutoff | contact_trunc
-            # print("terminated", term.nonzero().flatten().tolist())
-            # print("truncated", trunc.nonzero().flatten().tolist())
-            # print("cutoff", cutoff.nonzero().flatten().tolist())
-            done = term | trunc | cutoff
+                # print("terminated", term.nonzero().flatten().tolist())
+                # print("truncated", trunc.nonzero().flatten().tolist())
+                # print("cutoff", cutoff.nonzero().flatten().tolist())
+            done = done | cutoff
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             # terminate all done environments
@@ -499,8 +503,7 @@ class AHAC:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, term, trunc, _ = self.env.step(torch.tanh(actions), play=True)
-            done = term | trunc
+            obs, rew, done, _ = self.env.step(torch.tanh(actions), play=True)
 
             episode_length += 1
 
@@ -609,7 +612,7 @@ class AHAC:
         self.episode_discounted_loss = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
