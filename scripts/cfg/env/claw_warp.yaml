@@ -5,7 +5,7 @@ config:
     _target_: dmanip.config.ClawWarpConfig
     render: ${general.render}
     device: ${general.device}
-    num_envs: ${resolve_default:64,${general.num_envs}}
+    no_grad: ??? # decided based on algorithm
     seed: ${general.seed}
     episode_length: 240
     no_grad: ${general.play}
@@ -23,7 +23,7 @@ shac:
   betas: (0.7, 0.95)
 
 ppo:
-  max_epochs: 500 
+  max_epochs: 500
   minibatch_size: 1920
   save_interval: 100
   save_best_after: 50

@@ -108,40 +108,29 @@ cfg_path = os.path.join(cfg_path, "cfg")
 @hydra.main(config_path="cfg", config_name="config.yaml")
 def train(cfg: DictConfig):
     try:
-        cfg_full: OmegaConf = OmegaConf.to_container(cfg, resolve=True)
+        cfg_full = OmegaConf.to_container(cfg, resolve=True)
         run = create_wandb_run(cfg.wandb, cfg_full, run_wandb=cfg.general.run_wandb)
 
-        if "hac" in cfg.alg.name:
-            cfg_train = cfg_full["alg"]
-            if cfg.general.play:
-                cfg_train["params"]["config"]["num_actors"] = (
-                    cfg_train["params"]["config"].get("player", {}).get("num_actors", 1)
-                )
-            if not cfg.general.no_time_stamp:
-                cfg.general.logdir = os.path.join(cfg.general.logdir, get_time_stamp())
+        if "_target_" in cfg.alg:
+            # Run with hydra
+            cfg.env.config.no_grad = not cfg.general.train
 
-            cfg_train["params"]["general"] = cfg_full["general"]
-            cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
-            env_name = cfg_train["params"]["diff_env"].pop("_target_")
-            cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
-            print(cfg_train["params"]["general"])
-            if cfg.alg.name == "shac":
-                traj_optimizer = SHAC(cfg_train)
-            elif cfg.alg.name == "shac2":
-                traj_optimizer = SHAC2(cfg_train)
-            elif cfg.alg.name == "ahac":
-                traj_optimizer = AHAC(cfg_train)
-            else:
-                raise NotImplementedError
+            traj_optimizer = instantiate(
+                cfg.alg, env_config=cfg.env.config, logdir=cfg.general.logdir
+            )
 
-            if not cfg.general.play:
+            if cfg.general.train:
                 traj_optimizer.train()
             else:
                 traj_optimizer.play(cfg_train)
             wandb.finish()
         elif cfg.alg.name == "ppo":
+            # if not hydra init, then we must have PPO
             # to set up RL games we have to do a bunch of config menipulation
             # which makes it a huge mess...
+
+            # PPO doesn't need env grads
+            cfg.env.config.no_grad = True
 
             # first shuffle around config structure
             cfg_train = cfg_full["alg"]

@@ -5,10 +5,10 @@ config:
   _target_: shac.envs.HopperEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: ${resolve_default:256,${general.num_envs}}
+  num_envs: 1024
   seed: ${general.seed}
   episode_length: 1000
-  no_grad: ${general.play}
+  no_grad: ??? # decided based on algorithm
   stochastic_init: True
   MM_caching_frequency: 4
   early_termination: True
@@ -19,56 +19,30 @@ shac:
   actor_lr: 2e-3
   critic_lr: 4e-3
   max_epochs: 500
-  betas:
-    - 0.7
-    - 0.95
+  betas: [0.7, 0.95]
   actor_mlp:
-    units:
-      - 128
-      - 128
-      - 64
-      - 32
+    units: [128, 128, 64, 32]
   critic_mlp:
-    units:
-      - 64
-      - 64
+    units: [64, 64]
   save_interval: 400
 
 shac2:
   actor_lr: 2e-3
   critic_lr: 4e-3
   max_epochs: 500
-  betas:
-    - 0.7
-    - 0.95
+  betas: [0.7, 0.95]
   actor_mlp:
-    units:
-      - 128
-      - 64
-      - 32
+    units: [128, 128, 64, 32]
   critic_mlp:
-    units:
-      - 64
-      - 64
+    units: [64, 64]
   save_interval: 400
 
 ppo:
   max_epochs: 500
   minibatch_size: 8192
-  save_interval: 400
-  save_best_after: 100
   num_actors: 1024
   steps_num: 240
   actor_mlp:
-    units:
-      - 128
-      - 64
-      - 32
+    units: [128, 64, 32]
   critic_mlp:
-    units:
-      - 64
-      - 64
-
-player:
-  games_num: 1
-  num_actors: 1
+    units: [64, 64]

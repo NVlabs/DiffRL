@@ -6,11 +6,10 @@ defaults:
 exp_name: mpc_benchmarks
 
 id: ${hydra.job.id}
-resume_model: null
 
 general:
   num_envs: 256
-  play: True  # sets no_grad=True
+  play: True # sets no_grad=True
   logdir: logs/tmp/mpc/
   save_interval: False
   render: False

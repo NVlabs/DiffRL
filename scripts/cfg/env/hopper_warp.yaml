@@ -4,7 +4,7 @@ config:
   _target_: shac.envs.HopperWarpEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: ${resolve_default:512,${general.num_envs}}
+  num_envs: 512
   seed: ${general.seed}
   episode_length: 1000
   no_grad: ${general.play}
