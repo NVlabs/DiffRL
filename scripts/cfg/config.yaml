@@ -3,16 +3,6 @@ defaults:
   - env: cartpole
   - alg: shac
 
-hydra:
-  sweep:
-    dir: checkpoints/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    subdir: ${wandb.sweep_name_prefix}-${hydra.job.num}
-  # launcher: # submitit_slurm launcher params
-  #   gpus_per_node: 1
-  #   tasks_per_node: 4
-  #   cpus_per_task: 8
-  #
-
 # mostly used for logging and naming experiments
 exp_name: shac_benchmarks
 
@@ -38,4 +28,3 @@ wandb:
   project: shac
   entity: dmanip-rss
   group: ${exp_name}
-  sweep_name_prefix: ${env}_${alg}-run

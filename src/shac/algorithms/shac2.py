@@ -19,12 +19,12 @@ sys.path.append(project_dir)
 import time
 import copy
 from tensorboardX import SummaryWriter
-import yaml
+from omegaconf import DictConfig
+from hydra.utils import instantiate
+from typing import Optional, List, Tuple
 
-from shac import envs
-import shac.models.actor as actor_models
-import shac.models.critic as critic_models
 from shac.utils.common import *
+from shac.models.critic import CriticMLP, QCriticMLP, DoubleQCriticMLP
 import shac.utils.torch_utils as tu
 from shac.utils.running_mean_std import RunningMeanStd
 from shac.utils.dataset import CriticDataset, QCriticDataset
@@ -33,32 +33,55 @@ from shac.utils.average_meter import AverageMeter
 
 
 class SHAC:
-    def __init__(self, cfg):
-        env_name = cfg["params"]["diff_env"].pop("name")
-        env_fn = getattr(envs, env_name)
+    def __init__(
+        self,
+        env_config: DictConfig,
+        actor_config: DictConfig,
+        critic_config: DictConfig,
+        steps_num: int,  # horizon for short rollouts
+        max_epochs: int,  # number of short rollouts to do (i.e. epochs)
+        train: bool,  # if False, we only eval the policy
+        logdir: str,
+        grad_norm: Optional[float] = None,  # clip actor and ciritc grad norms
+        actor_lr: float = 2e-3,
+        critic_lr: float = 2e-3,
+        betas: Tuple[float, float] = (0.7, 0.95),
+        lr_schedule: str = "linear",
+        gamma: float = 0.99,
+        lam: float = 0.95,
+        rew_scale: float = 1.0,
+        obs_rms: bool = False,
+        ret_rms: bool = False,
+        critic_iterations: int = 16,
+        critic_batches: int = 4,
+        critic_method: str = "one-step",
+        target_critic_alpha: float = 0.4,
+        save_interval: int = 500,  # how often to save policy
+        stochastic_eval: bool = False,  # Whether to use stochastic actor in eval
+        contact_truncation: bool = True,
+        steps_min: int = 4,
+        score_keys: List[str] = [],
+        eval_runs: int = 12,
+        device: str = "cuda",
+    ):
+        # sanity check parameters
+        assert steps_num > 0
+        assert max_epochs > 0
+        assert actor_lr > 0
+        assert critic_lr > 0
+        assert lr_schedule in ["linear", "constant"]
+        assert 0 < gamma <= 1
+        assert 0 < lam <= 1
+        assert rew_scale > 0.0
+        assert critic_iterations > 0
+        assert critic_batches > 0
+        assert critic_method in ["one-step", "td-lambda"]
+        assert 0 < target_critic_alpha <= 1.0
+        assert save_interval > 0
+        assert eval_runs > 0
 
-        if "stochastic_init" in cfg["params"]["diff_env"]:
-            stochastic_init = cfg["params"]["diff_env"].pop("stochastic_init")
-        else:
-            stochastic_init = True
-
-        config = dict(
-            num_envs=cfg["params"]["config"]["num_actors"],
-            device=cfg["params"]["general"]["device"],
-            render=cfg["params"]["general"]["render"],
-            seed=cfg["params"]["general"]["seed"],
-            episode_length=cfg["params"]["diff_env"].get("episode_length", 250),
-            stochastic_init=stochastic_init,
-        )
-
-        config.update(cfg["params"].get("diff_env", {}))
-        seeding(config["seed"])
-
-        self.env = env_fn(**config)
-        # reset diff_env config for yaml
-        cfg["params"]["diff_env"] = config
-        cfg["params"]["diff_env"]["name"] = env_name
-
+        # Create environment
+        self.env = instantiate(env_config)
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
         print("num_obs = ", self.env.num_obs)
@@ -67,107 +90,79 @@ class SHAC:
         self.num_obs = self.env.num_obs
         self.num_actions = self.env.num_actions
         self.max_episode_length = self.env.episode_length
-        self.device = cfg["params"]["general"]["device"]
+        self.device = torch.device(device)
 
-        self.gamma = cfg["params"]["config"].get("gamma", 0.99)
+        self.steps_num = steps_num
+        self.max_epochs = max_epochs
+        self.actor_lr = actor_lr
+        self.critic_lr = critic_lr
+        self.lr_schedule = lr_schedule
 
-        self.critic_method = cfg["params"]["config"].get("critic_method", "one-step")
-        if self.critic_method == "td-lambda":
-            self.lam = cfg["params"]["config"].get("lambda", 0.95)
+        self.gamma = gamma
+        self.lam = lam
+        self.rew_scale = rew_scale
 
-        self.steps_num = cfg["params"]["config"]["steps_num"]
-        self.max_epochs = cfg["params"]["config"]["max_epochs"]
-        self.actor_lr = float(cfg["params"]["config"]["actor_learning_rate"])
-        self.critic_lr = float(cfg["params"]["config"]["critic_learning_rate"])
-        self.lr_schedule = cfg["params"]["config"].get("lr_schedule", "linear")
-
-        self.target_critic_alpha = cfg["params"]["config"].get(
-            "target_critic_alpha", 0.4
-        )
+        self.critic_method = critic_method
+        self.critic_iterations = critic_iterations
+        self.critic_batch_size = self.num_envs * self.steps_num // critic_batches
+        self.target_critic_alpha = target_critic_alpha
+        self.contact_truncation = contact_truncation
+        self.steps_min = steps_min
 
         self.obs_rms = None
-        if cfg["params"]["config"].get("obs_rms", False):
+        if obs_rms:
             self.obs_rms = RunningMeanStd(shape=(self.num_obs), device=self.device)
 
         self.ret_rms = None
-        if cfg["params"]["config"].get("ret_rms", False):
+        if ret_rms:
             self.ret_rms = RunningMeanStd(shape=(), device=self.device)
 
-        self.rew_scale = cfg["params"]["config"].get("rew_scale", 1.0)
+        env_name = self.env.__class__.__name__
+        self.name = self.__class__.__name__ + "_" + env_name
 
-        self.critic_iterations = cfg["params"]["config"].get("critic_iterations", 16)
-        self.num_batch = cfg["params"]["config"].get("num_batch", 4)
-        self.batch_size = self.num_envs * self.steps_num // self.num_batch
-        self.name = cfg["params"]["config"].get("name", "Ant")
+        self.grad_norm = grad_norm
+        self.stochastic_evaluation = stochastic_eval
+        self.save_interval = save_interval
 
-        self.truncate_grad = cfg["params"]["config"]["truncate_grads"]
-        self.grad_norm = cfg["params"]["config"]["grad_norm"]
-        self.contact_truncation = cfg["params"]["config"].get(
-            "contact_truncation", False
-        )
-        self.min_steps_from_truncation = cfg["params"]["config"].get(
-            "min_steps_before_truncation", 4
-        )
-
-        if cfg["params"]["general"]["train"]:
-            self.log_dir = cfg["params"]["general"]["logdir"]
+        if train:
+            self.log_dir = logdir
             os.makedirs(self.log_dir, exist_ok=True)
-            # save config
-            save_cfg = copy.deepcopy(cfg)
-            if "general" in save_cfg["params"]:
-                deleted_keys = []
-                for key in save_cfg["params"]["general"].keys():
-                    if key in save_cfg["params"]["config"]:
-                        deleted_keys.append(key)
-                for key in deleted_keys:
-                    del save_cfg["params"]["general"][key]
-
-            yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
             self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
-            # save interval
-            self.save_interval = cfg["params"]["config"].get("save_interval", 500)
-            # stochastic inference
-            self.stochastic_evaluation = True
-        else:
-            self.stochastic_evaluation = not (
-                cfg["params"]["config"]["player"].get("determenistic", False)
-                or cfg["params"]["config"]["player"].get("deterministic", False)
-            )
-            self.steps_num = self.env.episode_length
 
-        # create actor critic network
-        self.actor_name = cfg["params"]["network"].get("actor", "ActorStochasticMLP")
-        assert self.actor_name in ["ActorDeterministicMLP", "ActorStochasticMLP"]
-        self.critic_name = cfg["params"]["network"].get("critic", "CriticMLP")
-        actor_fn = getattr(actor_models, self.actor_name)
-        self.actor = actor_fn(
-            self.num_obs, self.num_actions, cfg["params"]["network"], device=self.device
+        # Create actor and critic
+        self.actor = instantiate(
+            actor_config,
+            obs_dim=self.num_obs,
+            action_dim=self.num_actions,
+            device=self.device,
         )
-        critic_fn = getattr(critic_models, self.critic_name)
-        if self.critic_name == "CriticMLP":
-            input_size = self.num_obs
-        elif self.critic_name == "QCriticMLP" or self.critic_name == "DoubleQCriticMLP":
-            input_size = self.num_obs + self.num_actions
-        self.critic = critic_fn(
-            input_size, cfg["params"]["network"], device=self.device
+
+        input_size = self.num_obs
+        if "QCrtitic" in critic_config._target_:
+            input_size += self.num_actions
+
+        self.critic = instantiate(
+            critic_config,
+            obs_dim=input_size,
+            device=self.device,
         )
 
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
-        if cfg["params"]["general"]["train"]:
+        if train:
             self.save("init_policy")
 
-        # initialize optimizer
+        # initialize optimizers
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.actor_lr,
+            self.actor_lr,
+            betas,
         )
         self.critic_optimizer = torch.optim.Adam(
             self.critic.parameters(),
-            betas=cfg["params"]["config"]["betas"],
-            lr=self.critic_lr,
+            self.critic_lr,
+            betas,
         )
 
         # replay buffer
@@ -176,17 +171,12 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
-        if self.critic_name.endswith("QCriticMLP"):
-            self.act_buf = torch.zeros(
-                (self.steps_num, self.num_envs, self.num_actions),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            # self.next_obs_buf = torch.zeros(
-            #     (self.steps_num, self.num_envs, self.num_obs),
-            #     dtype=torch.float32,
-            #     device=self.device,
-            # )
+
+        self.act_buf = torch.zeros(
+            (self.steps_num, self.num_envs, self.num_actions),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         self.rew_buf = torch.zeros(
             (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
@@ -246,33 +236,37 @@ class SHAC:
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
+        self.grad_norm_before_clip = np.inf
+        self.grad_norm_after_clip = np.inf
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_discounted_loss_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
         self.horizon_length_meter = AverageMeter(1, 100).to(self.device)
-        self.score_keys = cfg["params"]["config"].get("score_keys", [])
+        self.score_keys = score_keys
         self.episode_scores_meter_map = {
             key + "_final": AverageMeter(1, 100).to(self.device)
             for key in self.score_keys
         }
 
-        self.eval_runs = cfg["params"]["config"]["player"].get("games_num", 12)
+        self.eval_runs = eval_runs
 
         # timer
         self.time_report = TimeReport()
 
     def compute_values(self, obs):
         """Compute values for the given observations with target critic."""
-        if self.critic_name == "CriticMLP":
+        if type(self.critic) == CriticMLP:
             values = self.target_critic(obs).squeeze(-1)
-        elif self.critic_name == "QCriticMLP":
+        elif type(self.critic) == QCriticMLP:
             action = torch.tanh(self.actor(obs, deterministic=True))
             values = self.target_critic(obs, action).squeeze(-1)
-        elif self.critic_name == "DoubleQCriticMLP":
+        elif type(self.critic) == DoubleQCriticMLP:
             action = torch.tanh(self.actor(obs, deterministic=True))
             values = torch.minimum(*self.target_critic(obs, action)).squeeze(-1)
+        else:
+            raise NotImplementedError
         return values
 
     def compute_actor_loss(self, deterministic=False):
@@ -316,15 +310,8 @@ class SHAC:
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, done, info = self.env.step(torch.tanh(actions))
 
-            if self.critic_name.endswith("QCriticMLP"):
-                with torch.no_grad():
-                    self.act_buf[i] = actions.clone()
-
-            # if self.critic_name.endswith("QCriticMLP"):
-            #     with torch.no_grad():
-            #         self.next_obs_buf[i] = obs.clone()
-
             with torch.no_grad():
+                self.act_buf[i] = actions.clone()
                 raw_rew = rew.clone()
 
             # scale the reward
@@ -346,67 +333,42 @@ class SHAC:
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
             self.episode_length += 1
+            rollout_len += 1
 
-            trunc = info.get("contact_changed", torch.zeros_like(done))
-            trunc_on_contact = (
-                info.get("num_contact_changed", torch.zeros_like(done)) >= 1
-            )
-            if self.contact_truncation:
-                is_done = done.clone() | trunc_on_contact
-                trunc_env_ids = trunc_on_contact.nonzero(as_tuple=False).squeeze(-1)
-            else:
-                is_done = done.clone()
-                trunc_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
-            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
+            real_obs = info["obs_before_reset"]
+            # sanity check
+            if (~torch.isfinite(real_obs)).sum() > 0:
+                print("Got inf obs")
+                raise ValueError
 
-            next_values[i + 1] = self.compute_values(obs)
+            if self.obs_rms is not None:
+                real_obs = obs_rms.normalize(real_obs)
 
-            for id in done_env_ids:
-                if (
-                    torch.isnan(info["obs_before_reset"][id]).sum() > 0
-                    or torch.isinf(info["obs_before_reset"][id]).sum() > 0
-                    or (torch.abs(info["obs_before_reset"][id]) > 1e6).sum() > 0
-                ):  # ugly fix for nan values
-                    next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length:
-                    # set values to 0 due to early termination
-                    next_values[i + 1, id] = 0.0
-                else:
-                    # otherwise, use terminal value critic to estimate the long-term performance
-                    if self.obs_rms is not None:
-                        real_obs = obs_rms.normalize(info["obs_before_reset"][id])
-                    else:
-                        real_obs = info["obs_before_reset"][id]
-                    # if truncating on contact, compute model-free value
-                    # and at least min_steps have passed since last truncation/short horizon
-                    last_zero = (
-                        self.rew_buf[:i, id].eq(0).nonzero(as_tuple=False).squeeze(-1)
-                    )
-                    if len(last_zero) == 0:
-                        last_zero = i
-                    else:
-                        last_zero = last_zero[-1]
+            next_values[i + 1] = self.compute_values(real_obs)
 
-                    if (
-                        self.contact_truncation
-                        and id in trunc_env_ids
-                        and i - last_zero >= self.min_steps_from_truncation
-                    ):
-                        real_obs = real_obs.detach()
-
-                    next_values[i + 1, id] = self.compute_values(real_obs)
-
-            is_done = done.clone()
-            done_env_ids = is_done.nonzero(as_tuple=False).squeeze(-1)
+            # handle terminated environments which stopped for some bad reason
+            # since the reason is bad we set their value to 0
+            term = done & (self.episode_length < self.max_episode_length)
+            term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
+            for id in term_env_ids:
+                next_values[i + 1, id] = 0.0
 
             # sanity check
-            if (next_values[i + 1] > 1e6).sum() > 0 or (
-                next_values[i + 1] < -1e6
-            ).sum() > 0:
+            if (next_values > 1e6).sum() > 0 or (next_values < -1e6).sum() > 0:
                 print("next value error")
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
+
+            # The magic sauce: truncate on contact
+            if self.contact_truncation:
+                trunc = info.get("contact_changed", torch.zeros_like(done))
+                trunc = info.get("num_contact_changed", torch.zeros_like(done)) >= 1
+                # ensure that we have rolled out at least for steps_min
+                trunc = trunc & (rollout_len >= self.steps_min)
+                done = trunc | done
+
+            done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             if i < self.steps_num - 1:
                 # first terminate all rollouts which are 'done'
@@ -426,8 +388,8 @@ class SHAC:
             gamma = gamma * self.gamma
 
             # clear up gamma and rew_acc for done envs
-            gamma[trunc_env_ids] = 1.0
-            rew_acc[i + 1, trunc_env_ids] = 0.0
+            gamma[done_env_ids] = 1.0
+            rew_acc[i + 1, done_env_ids] = 0.0
             rollout_lens.extend(rollout_len[done_env_ids].tolist())
             rollout_len[done_env_ids] = 0
 
@@ -580,19 +542,18 @@ class SHAC:
 
     def compute_critic_loss(self, batch_sample):
         target_values = batch_sample["target_values"]
-        if self.critic_name == "DoubleQCriticMLP":
+        if type(self.critic) == DoubleQCriticMLP:
             q1, q2 = self.critic(batch_sample["obs"], batch_sample["act"])
-            critic_loss = ((q1 - target_values) ** 2).mean() + (
-                (q2 - target_values) ** 2
-            ).mean()
+            critic_loss = (q1 - target_values) ** 2 + (q2 - target_values) ** 2
+            critic_loss = critic_loss.mean()
+        elif type(self.critic) == CriticMLP:
+            v = self.critic(batch_sample["obs"]).squeeze(-1)
+            critic_loss = ((v - target_values) ** 2).mean()
+        elif type(self.critic) == QCriticMLP:
+            q = self.critic(batch_sample["obs"], batch_sample["act"]).squeeze(-1)
+            critic_loss = ((q - target_values) ** 2).mean()
         else:
-            if self.critic_name == "CriticMLP":
-                predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
-            elif self.critic_name == "QCriticMLP":
-                predicted_values = self.critic(
-                    batch_sample["obs"], batch_sample["act"]
-                ).squeeze(-1)
-            critic_loss = ((predicted_values - target_values) ** 2).mean()
+            raise NotImplementedError
 
         return critic_loss
 
@@ -657,7 +618,7 @@ class SHAC:
 
             with torch.no_grad():
                 self.grad_norm_before_clip = tu.grad_norm(self.actor.parameters())
-                if self.truncate_grad:
+                if self.grad_norm:
                     clip_grad_norm_(self.actor.parameters(), self.grad_norm)
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
 
@@ -703,16 +664,16 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                if self.critic_name == "CriticMLP":
+                if type(self.critic) == CriticMLP:
                     dataset = CriticDataset(
-                        self.batch_size,
+                        self.critic_batch_size,
                         self.obs_buf,
                         self.target_values,
                         drop_last=False,
                     )
                 else:
                     dataset = QCriticDataset(
-                        self.batch_size,
+                        self.critic_batch_size,
                         self.obs_buf,
                         self.act_buf,
                         self.target_values,
@@ -735,7 +696,7 @@ class SHAC:
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    if self.truncate_grad:
+                    if self.grad_norm:
                         clip_grad_norm_(self.critic.parameters(), self.grad_norm)
 
                     self.critic_optimizer.step()
@@ -867,7 +828,7 @@ class SHAC:
                 mean_episode_length = 0
 
             print(
-                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, grad norm before clip {:.2f}, grad norm after clip {:.2f}".format(
+                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, grad norm before/after clip {:.2f}/{:.2f}".format(
                     self.iter_count,
                     self.max_epochs,
                     mean_policy_loss,
@@ -937,8 +898,7 @@ class SHAC:
         if filename is None:
             filename = "best_policy"
         # double Q critic must be saved as state dict to be pickleable
-        if self.critic_name == "DoubleQCriticMLP":
-            print("saving critic state dict")
+        if type(self.critic) == DoubleQCriticMLP:
             critic = self.critic.state_dict()
             target_critic = self.target_critic.state_dict()
         else:
@@ -950,10 +910,11 @@ class SHAC:
         )
 
     def load(self, path):
+        print("Loading policy from", path)
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
         # double Q critic must be loaded as state dict to be pickleable
-        if self.critic_name == "DoubleQCriticMLP":
+        if type(self.critic) == DoubleQCriticMLP:
             self.critic.load_state_dict(checkpoint[1])
             self.target_critic.load_state_dict(checkpoint[2])
         else:

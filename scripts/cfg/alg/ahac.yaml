@@ -1,4 +1,4 @@
-_target_: shac.algorithms.shac2.SHAC
+_target_: shac.algorithms.ahac.AHAC
 _recursive_: False
 actor_config:
   _target_: shac.models.actor.ActorStochasticMLP
@@ -20,9 +20,9 @@ critic_method: td-lambda # ('td-lambda', 'one-step')
 lam: 0.95
 gamma: 0.99
 max_epochs: ${resolve_child:2000,${env.shac},max_epochs}
-steps_num: 32
 steps_min: 4
-contact_truncation: True
+steps_max: 64
+contact_theshold: 1e9
 grad_norm: 1.0
 save_interval: ${resolve_child:400,${env.shac},save_interval}
 stochastic_eval: False

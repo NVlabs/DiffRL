@@ -77,52 +77,64 @@ def register_envs(env_config):
     )
 
 
-def create_wandb_run(wandb_cfg, job_config, run_id=None, run_wandb=False):
+def create_wandb_run(wandb_cfg, job_config, run_id=None):
+    env_name = job_config["env"]["config"]["_target_"].split(".")[-1]
     try:
-        job_id = HydraConfig().get().job.num
-        override_dirname = HydraConfig().get().job.override_dirname
-        name = f"{wandb_cfg.sweep_name_prefix}-{job_id}"
-        notes = f"{override_dirname}"
+        alg_name = job_config["alg"]["_target_"].split(".")[-1]
     except:
-        name, notes = None, None
-    if run_wandb:
-        return wandb.init(
-            project=wandb_cfg.project,
-            config=job_config,
-            group=wandb_cfg.group,
-            entity=wandb_cfg.entity,
-            sync_tensorboard=True,
-            monitor_gym=True,
-            save_code=True,
-            name=name,
-            notes=notes,
-            id=run_id,
-            resume=run_id is not None,
-        )
+        alg_name = "PPO"
+    try:
+        # Multirun config
+        job_id = HydraConfig().get().job.num
+        name = f"{alg_name}_{env_name}_sweep_{job_id}"
+        notes = wandb_cfg.get("notes", None)
+    except:
+        # Normal (singular) run config
+        name = f"{alg_name}_{env_name}"
+        notes = wandb_cfg["notes"]  # force user to make notes
+    return wandb.init(
+        project=wandb_cfg.project,
+        config=job_config,
+        group=wandb_cfg.group,
+        entity=wandb_cfg.entity,
+        sync_tensorboard=True,
+        monitor_gym=True,
+        save_code=True,
+        name=name,
+        notes=notes,
+        id=run_id,
+        resume=run_id is not None,
+    )
 
 
 cfg_path = os.path.dirname(__file__)
 cfg_path = os.path.join(cfg_path, "cfg")
 
 
-@hydra.main(config_path="cfg", config_name="config.yaml")
+@hydra.main(config_path="cfg", config_name="config.yaml", version_base="1.2")
 def train(cfg: DictConfig):
     try:
         cfg_full = OmegaConf.to_container(cfg, resolve=True)
-        run = create_wandb_run(cfg.wandb, cfg_full, run_wandb=cfg.general.run_wandb)
+
+        if cfg.general.run_wandb:
+            create_wandb_run(cfg.wandb, cfg_full)
+
+        # patch code to make jobs log in the correct directory when doing multirun
+        logdir = HydraConfig.get()["runtime"]["output_dir"]
+        logdir = os.path.join(logdir, cfg.general.logdir)
 
         if "_target_" in cfg.alg:
             # Run with hydra
             cfg.env.config.no_grad = not cfg.general.train
 
             traj_optimizer = instantiate(
-                cfg.alg, env_config=cfg.env.config, logdir=cfg.general.logdir
+                cfg.alg, env_config=cfg.env.config, logdir=logdir
             )
 
             if cfg.general.train:
                 traj_optimizer.train()
             else:
-                traj_optimizer.play(cfg_train)
+                traj_optimizer.play(cfg_full)
             wandb.finish()
         elif cfg.alg.name == "ppo":
             # if not hydra init, then we must have PPO
