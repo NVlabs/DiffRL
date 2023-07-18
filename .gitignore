@@ -4,6 +4,8 @@
 *.swp
 *.swo
 tags
+**.out
+**.log
 
 dflex/dflex/kernels*/
 **logs/

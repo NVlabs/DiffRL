@@ -149,6 +149,12 @@ def train(cfg: DictConfig):
             cfg_train["params"]["general"] = cfg_full["general"]
             env_name = cfg_train["params"]["config"]["env_name"]
             cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+            cfg_train["params"]["general"]["logdir"] = logdir
+
+            # boilerplate to get rl_games working
+            cfg_train["params"]["general"]["play"] = not cfg_train["params"]["general"][
+                "train"
+            ]
 
             # Now handle different env instantiation
             if env_name.split("_")[0] == "df":
@@ -160,10 +166,8 @@ def train(cfg: DictConfig):
 
             # save config
             if cfg_train["params"]["general"]["train"]:
-                log_dir = cfg_train["params"]["general"]["logdir"]
-                os.makedirs(log_dir, exist_ok=True)
-                # save config
-                yaml.dump(cfg_train, open(os.path.join(log_dir, "cfg.yaml"), "w"))
+                os.makedirs(logdir, exist_ok=True)
+                yaml.dump(cfg_train, open(os.path.join(logdir, "cfg.yaml"), "w"))
 
             # register envs with the correct number of actors for PPO
             cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
@@ -178,6 +182,7 @@ def train(cfg: DictConfig):
             runner.load(cfg_train)
             runner.reset()
             runner.run(cfg_train["params"]["general"])
+            wandb.finish()
         else:
             raise NotImplementedError
     except:

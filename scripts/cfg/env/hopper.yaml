@@ -13,7 +13,7 @@ config:
   MM_caching_frequency: 4
   early_termination: True
   contact_ke: 2e4
-  contact_kd: 1e3
+  contact_kd:
 
 shac:
   actor_lr: 2e-3
@@ -21,7 +21,7 @@ shac:
   max_epochs: 500
   betas: [0.7, 0.95]
   actor_mlp:
-    units: [128, 128, 64, 32]
+    units: [128, 64, 32]
   critic_mlp:
     units: [64, 64]
   save_interval: 400
