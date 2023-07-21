@@ -32,7 +32,7 @@ shac2:
 ppo:
   actor_mlp:
     units: [64, 64]
-  max_epochs: 500
+  max_epochs: 100
   minibatch_size: 1920
   save_interval: 100
   save_best_after: 50

@@ -38,7 +38,7 @@ shac2:
   save_interval: 400
 
 ppo:
-  max_epochs: 500
+  max_epochs: 200
   minibatch_size: 8192
   num_actors: 1024
   steps_num: 240

@@ -15,6 +15,7 @@ config:
 shac:
   actor_lr: 2e-3
   critic_lr: 5e-4
+  max_epochs: 5000
   target_critic_alpha: 0.995
   actor_mlp:
     units: [256, 128]
