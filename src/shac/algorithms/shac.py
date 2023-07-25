@@ -172,28 +172,6 @@ class SHAC:
         )
         self.ret = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
 
-        # for kl divergence computing
-        self.old_mus = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.old_sigmas = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.mus = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.sigmas = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-
         # counting variables
         self.iter_count = 0
         self.step_count = 0
@@ -211,8 +189,9 @@ class SHAC:
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
-        self.horizon_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(
+            self.num_envs, dtype=torch.int, device=self.device
+        )
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
@@ -234,6 +213,10 @@ class SHAC:
 
         # timer
         self.time_report = TimeReport()
+
+    @property
+    def mean_horizon(self):
+        return self.horizon_length_meter.get_mean()
 
     def compute_actor_loss(self, deterministic=False):
         rew_acc = torch.zeros(
@@ -262,8 +245,6 @@ class SHAC:
             # normalize the current obs
             obs = obs_rms.normalize(obs)
 
-        # accumulates all rollout lengths after they have been cut
-        rollout_lens = []
         # keeps track of the current length of the rollout
         rollout_len = torch.zeros((self.num_envs,), device=self.device)
         # Start short horizon rollout
@@ -347,8 +328,6 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
-            rollout_lens.extend(rollout_len[done_env_ids].tolist())
-            rollout_len[done_env_ids] = 0
 
             # collect data for critic training
             with torch.no_grad():
@@ -370,31 +349,26 @@ class SHAC:
                         self.episode_discounted_loss[done_env_ids]
                     )
                     self.episode_length_meter.update(self.episode_length[done_env_ids])
+                    self.horizon_length_meter.update(rollout_len[done_env_ids])
+                    rollout_len[done_env_ids] = 0
                     for k, v in filter(lambda x: x[0] in self.score_keys, info.items()):
                         self.episode_scores_meter_map[k + "_final"].update(
                             v[done_env_ids]
                         )
-                    for done_env_id in done_env_ids:
-                        if (
-                            self.episode_loss[done_env_id] > 1e6
-                            or self.episode_loss[done_env_id] < -1e6
-                        ):
+                    for id in done_env_ids:
+                        if self.episode_loss[id] > 1e6 or self.episode_loss[id] < -1e6:
                             print("ep loss error")
                             raise ValueError
 
-                        self.episode_loss_his.append(
-                            self.episode_loss[done_env_id].item()
-                        )
+                        self.episode_loss_his.append(self.episode_loss[id].item())
                         self.episode_discounted_loss_his.append(
-                            self.episode_discounted_loss[done_env_id].item()
+                            self.episode_discounted_loss[id].item()
                         )
-                        self.episode_length_his.append(
-                            self.episode_length[done_env_id].item()
-                        )
-                        self.episode_loss[done_env_id] = 0.0
-                        self.episode_discounted_loss[done_env_id] = 0.0
-                        self.episode_length[done_env_id] = 0
-                        self.episode_gamma[done_env_id] = 1.0
+                        self.episode_length_his.append(self.episode_length[id].item())
+                        self.episode_loss[id] = 0.0
+                        self.episode_discounted_loss[id] = 0.0
+                        self.episode_length[id] = 0
+                        self.episode_gamma[id] = 1.0
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -404,10 +378,6 @@ class SHAC:
         self.actor_loss = actor_loss.detach().item()
 
         self.step_count += self.steps_num * self.num_envs
-
-        # logging of horizon lengths
-        rollout_lens.extend(rollout_len.tolist())
-        self.mean_horizon = np.mean(rollout_lens)
 
         return actor_loss
 
@@ -807,9 +777,6 @@ class SHAC:
         self.save("final_policy")
 
         # save reward/length history
-        self.episode_loss_his = np.array(self.episode_loss_his)
-        self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
-        self.episode_length_his = np.array(self.episode_length_his)
         np.save(
             open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
             self.episode_loss_his,
