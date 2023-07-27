@@ -36,7 +36,6 @@ def eval_rigid_contacts_art(
     body_f_s: df.tensor(df.spatial_vector),
     contact_changed: df.tensor(float),
 ):
-
     tid = df.tid()
 
     c_body = df.load(contact_body, tid)
@@ -111,15 +110,20 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
             if model.link_count:
                 state_out.body_ft_s = torch.zeros(
-                    (model.link_count, 6), dtype=torch.float32, device=model.adapter, requires_grad=True
+                    (model.link_count, 6),
+                    dtype=torch.float32,
+                    device=model.adapter,
+                    requires_grad=True,
                 )
                 state_out.body_f_ext_s = torch.zeros(
-                    (model.link_count, 6), dtype=torch.float32, device=model.adapter, requires_grad=True
+                    (model.link_count, 6),
+                    dtype=torch.float32,
+                    device=model.adapter,
+                    requires_grad=True,
                 )
 
             # damped springs
             if model.spring_count:
-
                 tape.launch(
                     func=eval_springs,
                     dim=model.spring_count,
@@ -137,7 +141,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
             # triangle elastic and lift/drag forces
             if model.tri_count and model.tri_ke > 0.0:
-
                 tape.launch(
                     func=eval_triangles,
                     dim=model.tri_count,
@@ -181,7 +184,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
             # triangle bending
             if model.edge_count:
-
                 tape.launch(
                     func=eval_bending,
                     dim=model.edge_count,
@@ -199,7 +201,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
             # particle ground contact
             if model.ground and model.particle_count:
-
                 tape.launch(
                     func=eval_contacts,
                     dim=model.particle_count,
@@ -217,7 +218,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
             # tetrahedral FEM
             if model.tet_count:
-
                 tape.launch(
                     func=eval_tetrahedra,
                     dim=model.tet_count,
@@ -237,7 +237,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
             # articulations
 
             if model.link_count:
-
                 # evaluate body transforms
                 tape.launch(
                     func=eval_rigid_fk,
@@ -311,7 +310,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
 
                 # particle shape contact
                 if model.particle_count:
-
                     # tape.launch(func=eval_soft_contacts,
                     #             dim=model.particle_count*model.shape_count,
                     #             inputs=[state_in.particle_q, state_in.particle_qd, model.contact_ke, model.contact_kd, model.contact_kf, model.contact_mu],
@@ -391,7 +389,6 @@ class ContactIntegrator(SemiImplicitIntegrator):
                 )
 
                 if update_mass_matrix:
-
                     model.alloc_mass_matrix()
 
                     # build J
@@ -466,7 +463,12 @@ class ContactIntegrator(SemiImplicitIntegrator):
                     tape.launch(
                         func=eval_dense_cholesky_batched,
                         dim=model.articulation_count,
-                        inputs=[model.articulation_H_start, model.articulation_H_rows, model.H, model.joint_armature],
+                        inputs=[
+                            model.articulation_H_start,
+                            model.articulation_H_rows,
+                            model.H,
+                            model.joint_armature,
+                        ],
                         outputs=[model.L],
                         adapter=model.adapter,
                         skip_check_grad=True,

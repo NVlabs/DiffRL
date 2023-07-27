@@ -114,10 +114,16 @@ class ContactSemiImplicitIntegrator(SemiImplicitIntegrator):
 
             if model.link_count:
                 state_out.body_ft_s = torch.zeros(
-                    (model.link_count, 6), dtype=torch.float32, device=model.adapter, requires_grad=True
+                    (model.link_count, 6),
+                    dtype=torch.float32,
+                    device=model.adapter,
+                    requires_grad=True,
                 )
                 state_out.body_f_ext_s = torch.zeros(
-                    (model.link_count, 6), dtype=torch.float32, device=model.adapter, requires_grad=True
+                    (model.link_count, 6),
+                    dtype=torch.float32,
+                    device=model.adapter,
+                    requires_grad=True,
                 )
 
             # damped springs
@@ -461,7 +467,12 @@ class ContactSemiImplicitIntegrator(SemiImplicitIntegrator):
                     tape.launch(
                         func=eval_dense_cholesky_batched,
                         dim=model.articulation_count,
-                        inputs=[model.articulation_H_start, model.articulation_H_rows, model.H, model.joint_armature],
+                        inputs=[
+                            model.articulation_H_start,
+                            model.articulation_H_rows,
+                            model.H,
+                            model.joint_armature,
+                        ],
                         outputs=[model.L],
                         adapter=model.adapter,
                         skip_check_grad=True,

@@ -12,7 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 # include parent path
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import dflex as df
 
@@ -23,8 +24,7 @@ df.ScopedTimer.enabled = False
 
 
 class Cloth:
-
-    sim_duration = 2.0       # seconds
+    sim_duration = 2.0  # seconds
     sim_substeps = 16
     sim_dt = (1.0 / 60.0) / sim_substeps
     sim_steps = int(sim_duration / sim_dt)
@@ -37,21 +37,22 @@ class Cloth:
 
     phase_count = 4
 
-    def __init__(self, adapter='cpu'):
-
+    def __init__(self, adapter="cpu"):
         torch.manual_seed(42)
 
         height = 2.5
 
         builder = df.sim.ModelBuilder()
-        builder.add_cloth_grid(pos=(0.0, height, 0.0),
-                               rot=df.quat_from_axis_angle((1.0, 0.5, 0.0), math.pi * 0.5),
-                               vel=(0.0, 0.0, 0.0),
-                               dim_x=16,
-                               dim_y=16,
-                               cell_x=0.125,
-                               cell_y=0.125,
-                               mass=1.0)                                                    #, fix_left=True, fix_right=True, fix_top=True, fix_bottom=True)
+        builder.add_cloth_grid(
+            pos=(0.0, height, 0.0),
+            rot=df.quat_from_axis_angle((1.0, 0.5, 0.0), math.pi * 0.5),
+            vel=(0.0, 0.0, 0.0),
+            dim_x=16,
+            dim_y=16,
+            cell_x=0.125,
+            cell_y=0.125,
+            mass=1.0,
+        )  # , fix_left=True, fix_right=True, fix_top=True, fix_bottom=True)
 
         self.model = builder.finalize(adapter)
         self.model.tri_ke = 10000.0
@@ -60,7 +61,7 @@ class Cloth:
         self.model.tri_lift = 10.0
         self.model.tri_drag = 5.0
 
-        self.model.contact_ke = 1.e+4
+        self.model.contact_ke = 1.0e4
         self.model.contact_kd = 1000.0
         self.model.contact_kf = 1000.0
         self.model.contact_mu = 0.5
@@ -69,9 +70,11 @@ class Cloth:
         self.model.ground = False
 
         self.target = torch.tensor((8.0, 0.0, 0.0), device=adapter)
-        self.initial_velocity = torch.tensor((1.0, 0.0, 0.0), requires_grad=True, device=adapter)
+        self.initial_velocity = torch.tensor(
+            (1.0, 0.0, 0.0), requires_grad=True, device=adapter
+        )
 
-        #-----------------------
+        # -----------------------
         # set up Usd renderer
 
         self.stage = Usd.Stage.CreateNew("outputs/drag.usd")
@@ -86,7 +89,6 @@ class Cloth:
         self.integrator = df.sim.SemiImplicitIntegrator()
 
     def loss(self, render=True):
-
         # reset state
         self.sim_time = 0.0
         self.state = self.model.state()
@@ -97,12 +99,13 @@ class Cloth:
 
         # run simulation
         for i in range(0, self.sim_steps):
-
             with df.ScopedTimer("simulate", False):
-                self.state = self.integrator.forward(self.model, self.state, self.sim_dt)
+                self.state = self.integrator.forward(
+                    self.model, self.state, self.sim_dt
+                )
 
             with df.ScopedTimer("render", False):
-                if (render and (i % self.sim_substeps == 0)):
+                if render and (i % self.sim_substeps == 0):
                     self.render_time += self.sim_dt * self.sim_substeps
                     self.renderer.update(self.state, self.render_time)
 
@@ -119,12 +122,10 @@ class Cloth:
         return loss
 
     def run(self):
-
         l = self.loss()
         self.stage.Save()
 
-    def train(self, mode='gd'):
-
+    def train(self, mode="gd"):
         writer = SummaryWriter()
         writer.add_hparams({"lr": self.train_rate, "mode": mode}, {})
 
@@ -136,13 +137,12 @@ class Cloth:
         param = self.initial_velocity
 
         def closure():
-
-            if (optimizer):
+            if optimizer:
                 optimizer.zero_grad()
 
             # render every N steps
             render = False
-            if ((self.step_count % self.render_steps) == 0):
+            if (self.step_count % self.render_steps) == 0:
                 render = True
 
             with df.ScopedTimer("forward"):
@@ -152,7 +152,7 @@ class Cloth:
                 l.backward()
 
             with df.ScopedTimer("save"):
-                if (render):
+                if render:
                     self.stage.Save()
 
             print(str(self.step_count) + ": " + str(l))
@@ -164,30 +164,34 @@ class Cloth:
             return l
 
         with df.ScopedTimer("step"):
-
-            if (mode == 'gd'):
-
+            if mode == "gd":
                 # simple Gradient Descent
                 for i in range(self.train_iters):
-
                     closure()
 
                     with torch.no_grad():
                         param -= self.train_rate * param.grad
                         param.grad.zero_()
             else:
-
                 # L-BFGS
-                if (mode == 'lbfgs'):
-                    optimizer = torch.optim.LBFGS([param], lr=0.1, tolerance_grad=1.e-5, tolerance_change=0.01, line_search_fn="strong_wolfe")
+                if mode == "lbfgs":
+                    optimizer = torch.optim.LBFGS(
+                        [param],
+                        lr=0.1,
+                        tolerance_grad=1.0e-5,
+                        tolerance_change=0.01,
+                        line_search_fn="strong_wolfe",
+                    )
 
                 # Adam
-                if (mode == 'adam'):
+                if mode == "adam":
                     optimizer = torch.optim.Adam([param], lr=self.train_rate * 4.0)
 
                 # SGD
-                if (mode == 'sgd'):
-                    optimizer = torch.optim.SGD([param], lr=self.train_rate * (1.0 / 32.0), momentum=0.8)
+                if mode == "sgd":
+                    optimizer = torch.optim.SGD(
+                        [param], lr=self.train_rate * (1.0 / 32.0), momentum=0.8
+                    )
 
                 # train
                 for i in range(self.train_iters):
@@ -203,8 +207,8 @@ class Cloth:
         self.network.eval()
 
 
-#---------
+# ---------
 
-cloth = Cloth(adapter='cpu')
-cloth.train('lbfgs')
-#cloth.run()
+cloth = Cloth(adapter="cpu")
+cloth.train("lbfgs")
+# cloth.run()

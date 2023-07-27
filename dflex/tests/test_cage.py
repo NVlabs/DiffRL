@@ -11,7 +11,8 @@ import time
 # include parent path
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import dflex as df
 
@@ -19,22 +20,19 @@ from pxr import Usd, UsdGeom, Gf
 
 
 class Cage:
-
-    sim_duration = 2.0       # seconds
+    sim_duration = 2.0  # seconds
     sim_substeps = 8
     sim_dt = (1.0 / 60.0) / sim_substeps
     sim_steps = int(sim_duration / sim_dt)
     sim_time = 0.0
 
     train_iters = 20
-    train_rate = 0.1         #1.0/(sim_dt*sim_dt)
+    train_rate = 0.1  # 1.0/(sim_dt*sim_dt)
 
-    def __init__(self, mode="quad", adapter='cpu'):
-
+    def __init__(self, mode="quad", adapter="cpu"):
         builder = df.sim.ModelBuilder()
 
-        if (mode == "quad"):
-
+        if mode == "quad":
             # anchors
             builder.add_particle((-1.0, 1.0, 0.0), (0.0, 0.0, 0.0), 0.0)
             builder.add_particle((1.0, 1.0, 0.0), (0.0, 0.0, 0.0), 0.0)
@@ -44,7 +42,7 @@ class Cage:
             # ball
             builder.add_particle((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0)
 
-            ke = 1.e+2
+            ke = 1.0e2
             kd = 10.0
 
             # springs
@@ -56,8 +54,7 @@ class Cage:
             self.target_pos = torch.tensor((0.85, 0.5, 0.0), device=adapter)
             self.target_index = 4
 
-        if (mode == "box"):
-
+        if mode == "box":
             # anchors
             builder.add_particle((-1.0, -1.0, -1.0), (0.0, 0.0, 0.0), 0.0)
             builder.add_particle((-1.0, -1.0, 1.0), (0.0, 0.0, 0.0), 0.0)
@@ -71,7 +68,7 @@ class Cage:
             # ball
             builder.add_particle((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0)
 
-            ke = 1.e+2
+            ke = 1.0e2
             kd = 10.0
 
             target = 8
@@ -89,24 +86,24 @@ class Cage:
             self.target_pos = torch.tensor((0.85, 0.5, -0.75), device=adapter)
             self.target_index = target
 
-        if (mode == "chain"):
-
+        if mode == "chain":
             # anchor
             builder.add_particle((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.0)
 
             segments = 4
             segment_length = 1.0
 
-            ke = 1.e+2
+            ke = 1.0e2
             kd = 10.0
 
             for i in range(1, segments + 1):
-
-                builder.add_particle((segment_length * i, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0)
+                builder.add_particle(
+                    (segment_length * i, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0
+                )
                 builder.add_spring(i - 1, i, ke, kd, 0)
 
                 # bending spring
-                if (i > 1):
+                if i > 1:
                     builder.add_spring(i - 2, i, ke * 4.0, kd, 0)
 
             self.target_pos = torch.tensor((3.0, 0.0, 0.0), device=adapter)
@@ -120,7 +117,7 @@ class Cage:
         # set optimization targets
         self.model.spring_rest_length.requires_grad_()
 
-        #-----------------------
+        # -----------------------
         # set up Usd renderer
 
         self.stage = Usd.Stage.CreateNew("outputs/cage.usda")
@@ -135,14 +132,12 @@ class Cage:
         self.integrator = df.sim.SemiImplicitIntegrator()
 
     def loss(self):
-
-        #-----------------------
+        # -----------------------
         # run simulation
 
         self.state = self.model.state()
 
         for i in range(0, self.sim_steps):
-
             self.state = self.integrator.forward(self.model, self.state, self.sim_dt)
             # print("state: ", self.state.particle_q[self.target_index])
 
@@ -157,17 +152,15 @@ class Cage:
         return loss
 
     def run(self):
-
         l = self.loss()
         self.stage.Save()
 
-    def train(self, mode='gd'):
-
+    def train(self, mode="gd"):
         # param to train
         param = self.model.spring_rest_length
 
         # Gradient Descent
-        if (mode == 'gd'):
+        if mode == "gd":
             for i in range(self.train_iters):
                 # with torch.autograd.detect_anomaly():
                 l = self.loss()
@@ -179,9 +172,14 @@ class Cage:
                     param.grad.zero_()
 
         # L-BFGS
-        if (mode == 'lbfgs'):
-
-            optimizer = torch.optim.LBFGS([param], self.train_rate, tolerance_grad=1.e-5, history_size=4, line_search_fn="strong_wolfe")
+        if mode == "lbfgs":
+            optimizer = torch.optim.LBFGS(
+                [param],
+                self.train_rate,
+                tolerance_grad=1.0e-5,
+                history_size=4,
+                line_search_fn="strong_wolfe",
+            )
 
             def closure():
                 optimizer.zero_grad()
@@ -196,8 +194,7 @@ class Cage:
                 optimizer.step(closure)
 
         # SGD
-        if (mode == 'sgd'):
-
+        if mode == "sgd":
             optimizer = torch.optim.SGD([param], lr=self.train_rate, momentum=0.8)
 
             for i in range(self.train_iters):
@@ -213,8 +210,8 @@ class Cage:
         self.stage.Save()
 
 
-#---------
+# ---------
 
-cage = Cage("box", adapter='cpu')
-cage.train('gd')
-#cage.run()
+cage = Cage("box", adapter="cpu")
+cage.train("gd")
+# cage.run()

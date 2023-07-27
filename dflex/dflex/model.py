@@ -83,7 +83,6 @@ class Mesh:
         mass = 0.0
 
         for i in range(num_tris):
-
             p = np.array(vertices[indices[i * 3 + 0]])
             q = np.array(vertices[indices[i * 3 + 1]])
             r = np.array(vertices[indices[i * 3 + 2]])
@@ -107,7 +106,6 @@ class Mesh:
             )
 
             for j in range(4):
-
                 # displacement of quadrature point from COM
                 d = quads[j] - com
 
@@ -140,7 +138,6 @@ class State:
     """
 
     def __init__(self):
-
         self.particle_count = 0
         self.link_count = 0
 
@@ -258,7 +255,6 @@ class Model:
     """
 
     def __init__(self, adapter):
-
         self.particle_q = None
         self.particle_qd = None
         self.particle_mass = None
@@ -320,7 +316,9 @@ class Model:
         self.spring_count = 0
         self.contact_count = 0
 
-        self.gravity = torch.tensor((0.0, -9.8, 0.0), dtype=torch.float32, device=adapter)
+        self.gravity = torch.tensor(
+            (0.0, -9.8, 0.0), dtype=torch.float32, device=adapter
+        )
 
         self.contact_distance = 0.1
         self.contact_ke = 1.0e3
@@ -377,29 +375,58 @@ class Model:
             s.particle_f = torch.empty_like(self.particle_qd, requires_grad=True)
 
         if self.link_count:
-
             # joints
             s.joint_qdd = torch.empty_like(self.joint_qd, requires_grad=True)
             s.joint_tau = torch.empty_like(self.joint_qd, requires_grad=True)
             s.joint_S_s = torch.empty(
-                (self.joint_dof_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True
+                (self.joint_dof_count, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
             )
 
             # derived rigid body data (maximal coordinates)
             s.body_X_sc = torch.empty(
-                (self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True
+                (self.link_count, 7),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
             )
             s.body_X_sm = torch.empty(
-                (self.link_count, 7), dtype=torch.float32, device=self.adapter, requires_grad=True
+                (self.link_count, 7),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
             )
             s.body_I_s = torch.empty(
-                (self.link_count, 6, 6), dtype=torch.float32, device=self.adapter, requires_grad=True
+                (self.link_count, 6, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
             )
-            s.body_v_s = torch.empty((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            s.body_a_s = torch.empty((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
-            s.body_f_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
+            s.body_v_s = torch.empty(
+                (self.link_count, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            s.body_a_s = torch.empty(
+                (self.link_count, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            s.body_f_s = torch.zeros(
+                (self.link_count, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
             s.contact_changed = torch.zeros(
-                self.link_count, dtype=torch.float32, device=self.adapter, requires_grad=True
+                self.link_count,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
             )
             # s.body_ft_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
             # s.body_f_ext_s = torch.zeros((self.link_count, 6), dtype=torch.float32, device=self.adapter, requires_grad=True)
@@ -407,17 +434,40 @@ class Model:
         return s
 
     def alloc_mass_matrix(self):
-
         if self.link_count:
-
             # system matrices
-            self.M = torch.zeros(self.M_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
-            self.J = torch.zeros(self.J_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
-            self.P = torch.empty(self.J_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
-            self.H = torch.empty(self.H_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
+            self.M = torch.zeros(
+                self.M_size,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            self.J = torch.zeros(
+                self.J_size,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            self.P = torch.empty(
+                self.J_size,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            self.H = torch.empty(
+                self.H_size,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
 
             # zero since only upper triangle is set which can trigger NaN detection
-            self.L = torch.zeros(self.H_size, dtype=torch.float32, device=self.adapter, requires_grad=True)
+            self.L = torch.zeros(
+                self.H_size,
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
 
     def flatten(self):
         """Returns a list of Tensors stored by the model
@@ -476,46 +526,95 @@ class Model:
             mat.append(m)
 
         for i in range(self.shape_count):
-
             # transform from shape to body
             X_bs = transform_expand(self.shape_transform[i].tolist())
 
             geo_type = self.shape_geo_type[i].item()
 
             if geo_type == GEO_SPHERE:
-
                 radius = self.shape_geo_scale[i][0].item()
 
                 add_contact(self.shape_body[i], -1, X_bs, (0.0, 0.0, 0.0), radius, i)
 
             elif geo_type == GEO_CAPSULE:
-
                 radius = self.shape_geo_scale[i][0].item()
                 half_width = self.shape_geo_scale[i][1].item()
 
-                add_contact(self.shape_body[i], -1, X_bs, (-half_width, 0.0, 0.0), radius, i)
-                add_contact(self.shape_body[i], -1, X_bs, (half_width, 0.0, 0.0), radius, i)
+                add_contact(
+                    self.shape_body[i], -1, X_bs, (-half_width, 0.0, 0.0), radius, i
+                )
+                add_contact(
+                    self.shape_body[i], -1, X_bs, (half_width, 0.0, 0.0), radius, i
+                )
 
             elif geo_type == GEO_BOX:
-
                 edges = self.shape_geo_scale[i].tolist()
 
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], -edges[1], -edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (edges[0], -edges[1], -edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], edges[1], -edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (edges[0], edges[1], -edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], -edges[1], edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (edges[0], -edges[1], edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (-edges[0], edges[1], edges[2]), 0.0, i)
-                add_contact(self.shape_body[i], -1, X_bs, (edges[0], edges[1], edges[2]), 0.0, i)
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (-edges[0], -edges[1], -edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (edges[0], -edges[1], -edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (-edges[0], edges[1], -edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (edges[0], edges[1], -edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (-edges[0], -edges[1], edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (edges[0], -edges[1], edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i],
+                    -1,
+                    X_bs,
+                    (-edges[0], edges[1], edges[2]),
+                    0.0,
+                    i,
+                )
+                add_contact(
+                    self.shape_body[i], -1, X_bs, (edges[0], edges[1], edges[2]), 0.0, i
+                )
 
             elif geo_type == GEO_MESH:
-
                 mesh = self.shape_geo_src[i]
                 scale = self.shape_geo_scale[i]
 
                 for v in mesh.vertices:
-
                     p = (v[0] * scale[0], v[1] * scale[1], v[2] * scale[2])
 
                     add_contact(self.shape_body[i], -1, X_bs, p, 0.0, i)
@@ -523,9 +622,13 @@ class Model:
         # send to torch
         self.contact_body0 = torch.tensor(body0, dtype=torch.int32, device=self.adapter)
         self.contact_body1 = torch.tensor(body1, dtype=torch.int32, device=self.adapter)
-        self.contact_point0 = torch.tensor(point, dtype=torch.float32, device=self.adapter)
+        self.contact_point0 = torch.tensor(
+            point, dtype=torch.float32, device=self.adapter
+        )
         self.contact_dist = torch.tensor(dist, dtype=torch.float32, device=self.adapter)
-        self.contact_material = torch.tensor(mat, dtype=torch.int32, device=self.adapter)
+        self.contact_material = torch.tensor(
+            mat, dtype=torch.int32, device=self.adapter
+        )
 
         self.contact_count = len(body0)
 
@@ -563,7 +666,6 @@ class ModelBuilder:
     """
 
     def __init__(self):
-
         # particles
         self.particle_q = []
         self.particle_qd = []
@@ -611,8 +713,12 @@ class ModelBuilder:
         self.muscle_points = []
 
         # rigid bodies
-        self.joint_parent = []  # index of the parent body                      (constant)
-        self.joint_child = []  # index of the child body                       (constant)
+        self.joint_parent = (
+            []
+        )  # index of the parent body                      (constant)
+        self.joint_child = (
+            []
+        )  # index of the child body                       (constant)
         self.joint_axis = []  # joint axis in child joint frame               (constant)
         self.joint_X_pj = []  # frame of joint in parent                      (constant)
         self.joint_X_cm = []  # frame of child com (in child coordinates)     (constant)
@@ -722,7 +828,6 @@ class ModelBuilder:
             self.joint_limit_upper.append(limit_upper)
 
         elif type == JOINT_BALL:
-
             # quaternion
             self.joint_q.append(0.0)
             self.joint_q.append(0.0)
@@ -757,7 +862,6 @@ class ModelBuilder:
         elif type == JOINT_FIXED:
             pass
         elif type == JOINT_FREE:
-
             # translation
             self.joint_q.append(0.0)
             self.joint_q.append(0.0)
@@ -814,7 +918,14 @@ class ModelBuilder:
 
     # muscles
     def add_muscle(
-        self, links: List[int], positions: List[Vec3], f0: float, lm: float, lt: float, lmax: float, pen: float
+        self,
+        links: List[int],
+        positions: List[Vec3],
+        f0: float,
+        lm: float,
+        lt: float,
+        lmax: float,
+        pen: float,
     ) -> float:
         """Adds a muscle-tendon activation unit
 
@@ -838,7 +949,6 @@ class ModelBuilder:
         self.muscle_activation.append(0.0)
 
         for i in range(n):
-
             self.muscle_links.append(links[i])
             self.muscle_points.append(positions[i])
 
@@ -864,7 +974,19 @@ class ModelBuilder:
             mu: The coefficient of friction
 
         """
-        self._add_shape(-1, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), GEO_PLANE, plane, None, 0.0, ke, kd, kf, mu)
+        self._add_shape(
+            -1,
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+            GEO_PLANE,
+            plane,
+            None,
+            0.0,
+            ke,
+            kd,
+            kf,
+            mu,
+        )
 
     def add_shape_sphere(
         self,
@@ -893,7 +1015,19 @@ class ModelBuilder:
 
         """
 
-        self._add_shape(body, pos, rot, GEO_SPHERE, (radius, 0.0, 0.0, 0.0), None, density, ke, kd, kf, mu)
+        self._add_shape(
+            body,
+            pos,
+            rot,
+            GEO_SPHERE,
+            (radius, 0.0, 0.0, 0.0),
+            None,
+            density,
+            ke,
+            kd,
+            kf,
+            mu,
+        )
 
     def add_shape_box(
         self,
@@ -926,7 +1060,9 @@ class ModelBuilder:
 
         """
 
-        self._add_shape(body, pos, rot, GEO_BOX, (hx, hy, hz, 0.0), None, density, ke, kd, kf, mu)
+        self._add_shape(
+            body, pos, rot, GEO_BOX, (hx, hy, hz, 0.0), None, density, ke, kd, kf, mu
+        )
 
     def add_shape_capsule(
         self,
@@ -957,7 +1093,19 @@ class ModelBuilder:
 
         """
 
-        self._add_shape(body, pos, rot, GEO_CAPSULE, (radius, half_width, 0.0, 0.0), None, density, ke, kd, kf, mu)
+        self._add_shape(
+            body,
+            pos,
+            rot,
+            GEO_CAPSULE,
+            (radius, half_width, 0.0, 0.0),
+            None,
+            density,
+            ke,
+            kd,
+            kf,
+            mu,
+        )
 
     def add_shape_mesh(
         self,
@@ -988,7 +1136,19 @@ class ModelBuilder:
 
         """
 
-        self._add_shape(body, pos, rot, GEO_MESH, (scale[0], scale[1], scale[2], 0.0), mesh, density, ke, kd, kf, mu)
+        self._add_shape(
+            body,
+            pos,
+            rot,
+            GEO_MESH,
+            (scale[0], scale[1], scale[2], 0.0),
+            mesh,
+            density,
+            ke,
+            kd,
+            kf,
+            mu,
+        )
 
     def _add_shape(self, body, pos, rot, type, scale, src, density, ke, kd, kf, mu):
         self.shape_body.append(body)
@@ -1106,7 +1266,14 @@ class ModelBuilder:
         return area
 
     def add_tetrahedron(
-        self, i: int, j: int, k: int, l: int, k_mu: float = 1.0e3, k_lambda: float = 1.0e3, k_damp: float = 0.0
+        self,
+        i: int,
+        j: int,
+        k: int,
+        l: int,
+        k_mu: float = 1.0e3,
+        k_lambda: float = 1.0e3,
+        k_damp: float = 0.0,
     ) -> float:
         """Adds a tetrahedral FEM element between four particles in the system.
 
@@ -1145,7 +1312,6 @@ class ModelBuilder:
         if volume <= 0.0:
             print("inverted tetrahedral element")
         else:
-
             inv_Dm = np.linalg.inv(Dm)
 
             self.tet_indices.append((i, j, k, l))
@@ -1177,7 +1343,6 @@ class ModelBuilder:
         """
         # compute rest angle
         if rest == None:
-
             x1 = np.array(self.particle_q[i])
             x2 = np.array(self.particle_q[j])
             x3 = np.array(self.particle_q[k])
@@ -1213,7 +1378,6 @@ class ModelBuilder:
         fix_top: bool = False,
         fix_bottom: bool = False,
     ):
-
         """Helper to create a regular planar cloth grid
 
         Creates a rectangular grid of particles with FEM triangles and bending elements
@@ -1244,7 +1408,6 @@ class ModelBuilder:
 
         for y in range(0, dim_y + 1):
             for x in range(0, dim_x + 1):
-
                 g = np.array((x * cell_x, y * cell_y, 0.0))
                 p = quat_rotate(rot, g) + pos
                 m = mass
@@ -1261,7 +1424,6 @@ class ModelBuilder:
                 self.add_particle(p, vel, m)
 
                 if x > 0 and y > 0:
-
                     if reverse_winding:
                         tri1 = (
                             start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
@@ -1279,7 +1441,6 @@ class ModelBuilder:
                         self.add_triangle(*tri2)
 
                     else:
-
                         tri1 = (
                             start_vertex + grid_index(x - 1, y - 1, dim_x + 1),
                             start_vertex + grid_index(x, y - 1, dim_x + 1),
@@ -1303,12 +1464,13 @@ class ModelBuilder:
         adj = MeshAdjacency(self.tri_indices[start_tri:end_tri], end_tri - start_tri)
 
         for k, e in adj.edges.items():
-
             # skip open edges
             if e.f0 == -1 or e.f1 == -1:
                 continue
 
-            self.add_edge(e.o0, e.o1, e.v0, e.v1)  # opposite 0, opposite 1, vertex 0, vertex 1
+            self.add_edge(
+                e.o0, e.o1, e.v0, e.v1
+            )  # opposite 0, opposite 1, vertex 0, vertex 1
 
     def add_cloth_mesh(
         self,
@@ -1349,14 +1511,12 @@ class ModelBuilder:
 
         # particles
         for i, v in enumerate(vertices):
-
             p = quat_rotate(rot, v * scale) + pos
 
             self.add_particle(p, vel, 0.0)
 
         # triangles
         for t in range(num_tris):
-
             i = start_vertex + indices[t * 3 + 0]
             j = start_vertex + indices[t * 3 + 1]
             k = start_vertex + indices[t * 3 + 2]
@@ -1368,7 +1528,6 @@ class ModelBuilder:
 
             # add area fraction to particles
             if area > 0.0:
-
                 self.particle_mass[i] += density * area / 3.0
                 self.particle_mass[j] += density * area / 3.0
                 self.particle_mass[k] += density * area / 3.0
@@ -1380,7 +1539,6 @@ class ModelBuilder:
 
         # bend constraints
         for k, e in adj.edges.items():
-
             # skip open edges
             if e.f0 == -1 or e.f1 == -1:
                 continue
@@ -1443,7 +1601,6 @@ class ModelBuilder:
         for z in range(dim_z + 1):
             for y in range(dim_y + 1):
                 for x in range(dim_x + 1):
-
                     v = np.array((x * cell_x, y * cell_y, z * cell_z))
                     m = mass
 
@@ -1488,7 +1645,6 @@ class ModelBuilder:
         for z in range(dim_z):
             for y in range(dim_y):
                 for x in range(dim_x):
-
                     v0 = grid_index(x, y, z) + start_vertex
                     v1 = grid_index(x + 1, y, z) + start_vertex
                     v2 = grid_index(x + 1, y, z + 1) + start_vertex
@@ -1499,7 +1655,6 @@ class ModelBuilder:
                     v7 = grid_index(x, y + 1, z + 1) + start_vertex
 
                     if (x & 1) ^ (y & 1) ^ (z & 1):
-
                         add_tet(v0, v1, v4, v3)
                         add_tet(v2, v3, v6, v1)
                         add_tet(v5, v4, v1, v6)
@@ -1507,7 +1662,6 @@ class ModelBuilder:
                         add_tet(v4, v1, v6, v3)
 
                     else:
-
                         add_tet(v1, v2, v5, v0)
                         add_tet(v3, v0, v7, v2)
                         add_tet(v4, v7, v0, v5)
@@ -1562,14 +1716,12 @@ class ModelBuilder:
 
         # add particles
         for v in vertices:
-
             p = quat_rotate(rot, v * scale) + pos
 
             self.add_particle(p, vel, 0.0)
 
         # add tetrahedra
         for t in range(num_tets):
-
             v0 = start_vertex + indices[t * 4 + 0]
             v1 = start_vertex + indices[t * 4 + 1]
             v2 = start_vertex + indices[t * 4 + 2]
@@ -1579,7 +1731,6 @@ class ModelBuilder:
 
             # distribute volume fraction to particles
             if volume > 0.0:
-
                 self.particle_mass[v0] += density * volume / 4.0
                 self.particle_mass[v1] += density * volume / 4.0
                 self.particle_mass[v2] += density * volume / 4.0
@@ -1639,14 +1790,18 @@ class ModelBuilder:
         m = ms + mc
 
         # adapted from ODE
-        Ia = mc * (0.25 * r * r + (1.0 / 12.0) * l * l) + ms * (0.4 * r * r + 0.375 * r * l + 0.25 * l * l)
+        Ia = mc * (0.25 * r * r + (1.0 / 12.0) * l * l) + ms * (
+            0.4 * r * r + 0.375 * r * l + 0.25 * l * l
+        )
         Ib = (mc * 0.5 + ms * 0.4) * r * r
 
         I = np.array([[Ib, 0.0, 0.0], [0.0, Ia, 0.0], [0.0, 0.0, Ia]])
 
         return (m, I)
 
-    def compute_box_inertia(self, density: float, w: float, h: float, d: float) -> tuple:
+    def compute_box_inertia(
+        self, density: float, w: float, h: float, d: float
+    ) -> tuple:
         """Helper to compute mass and inertia of a box
 
         Args:
@@ -1672,14 +1827,15 @@ class ModelBuilder:
         return (m, I)
 
     def _compute_shape_mass(self, type, scale, src, density):
-
         if density == 0:  # zero density means fixed
             return 0, np.zeros((3, 3))
 
         if type == GEO_SPHERE:
             return self.compute_sphere_inertia(density, scale[0])
         elif type == GEO_BOX:
-            return self.compute_box_inertia(density, scale[0] * 2.0, scale[1] * 2.0, scale[2] * 2.0)
+            return self.compute_box_inertia(
+                density, scale[0] * 2.0, scale[1] * 2.0, scale[2] * 2.0
+            )
         elif type == GEO_CAPSULE:
             return self.compute_capsule_inertia(density, scale[0], scale[1] * 2.0)
         elif type == GEO_MESH:
@@ -1689,7 +1845,6 @@ class ModelBuilder:
 
     # incrementally updates rigid body mass with additional mass and inertia expressed at a local to the body
     def _update_body_mass(self, i, m, I, p, q):
-
         if i == -1:
             return
 
@@ -1745,54 +1900,94 @@ class ModelBuilder:
         # particles
 
         # state (initial)
-        m.particle_q = torch.tensor(self.particle_q, dtype=torch.float32, device=adapter)
-        m.particle_qd = torch.tensor(self.particle_qd, dtype=torch.float32, device=adapter)
+        m.particle_q = torch.tensor(
+            self.particle_q, dtype=torch.float32, device=adapter
+        )
+        m.particle_qd = torch.tensor(
+            self.particle_qd, dtype=torch.float32, device=adapter
+        )
 
         # model
-        m.particle_mass = torch.tensor(self.particle_mass, dtype=torch.float32, device=adapter)
-        m.particle_inv_mass = torch.tensor(particle_inv_mass, dtype=torch.float32, device=adapter)
+        m.particle_mass = torch.tensor(
+            self.particle_mass, dtype=torch.float32, device=adapter
+        )
+        m.particle_inv_mass = torch.tensor(
+            particle_inv_mass, dtype=torch.float32, device=adapter
+        )
 
         # ---------------------
         # collision geometry
 
         m.shape_transform = torch.tensor(
-            transform_flatten_list(self.shape_transform), dtype=torch.float32, device=adapter
+            transform_flatten_list(self.shape_transform),
+            dtype=torch.float32,
+            device=adapter,
         )
         m.shape_body = torch.tensor(self.shape_body, dtype=torch.int32, device=adapter)
-        m.shape_geo_type = torch.tensor(self.shape_geo_type, dtype=torch.int32, device=adapter)
+        m.shape_geo_type = torch.tensor(
+            self.shape_geo_type, dtype=torch.int32, device=adapter
+        )
         m.shape_geo_src = self.shape_geo_src
-        m.shape_geo_scale = torch.tensor(self.shape_geo_scale, dtype=torch.float32, device=adapter)
-        m.shape_materials = torch.tensor(self.shape_materials, dtype=torch.float32, device=adapter)
+        m.shape_geo_scale = torch.tensor(
+            self.shape_geo_scale, dtype=torch.float32, device=adapter
+        )
+        m.shape_materials = torch.tensor(
+            self.shape_materials, dtype=torch.float32, device=adapter
+        )
 
         # ---------------------
         # springs
 
-        m.spring_indices = torch.tensor(self.spring_indices, dtype=torch.int32, device=adapter)
-        m.spring_rest_length = torch.tensor(self.spring_rest_length, dtype=torch.float32, device=adapter)
-        m.spring_stiffness = torch.tensor(self.spring_stiffness, dtype=torch.float32, device=adapter)
-        m.spring_damping = torch.tensor(self.spring_damping, dtype=torch.float32, device=adapter)
-        m.spring_control = torch.tensor(self.spring_control, dtype=torch.float32, device=adapter)
+        m.spring_indices = torch.tensor(
+            self.spring_indices, dtype=torch.int32, device=adapter
+        )
+        m.spring_rest_length = torch.tensor(
+            self.spring_rest_length, dtype=torch.float32, device=adapter
+        )
+        m.spring_stiffness = torch.tensor(
+            self.spring_stiffness, dtype=torch.float32, device=adapter
+        )
+        m.spring_damping = torch.tensor(
+            self.spring_damping, dtype=torch.float32, device=adapter
+        )
+        m.spring_control = torch.tensor(
+            self.spring_control, dtype=torch.float32, device=adapter
+        )
 
         # ---------------------
         # triangles
 
-        m.tri_indices = torch.tensor(self.tri_indices, dtype=torch.int32, device=adapter)
+        m.tri_indices = torch.tensor(
+            self.tri_indices, dtype=torch.int32, device=adapter
+        )
         m.tri_poses = torch.tensor(self.tri_poses, dtype=torch.float32, device=adapter)
-        m.tri_activations = torch.tensor(self.tri_activations, dtype=torch.float32, device=adapter)
+        m.tri_activations = torch.tensor(
+            self.tri_activations, dtype=torch.float32, device=adapter
+        )
 
         # ---------------------
         # edges
 
-        m.edge_indices = torch.tensor(self.edge_indices, dtype=torch.int32, device=adapter)
-        m.edge_rest_angle = torch.tensor(self.edge_rest_angle, dtype=torch.float32, device=adapter)
+        m.edge_indices = torch.tensor(
+            self.edge_indices, dtype=torch.int32, device=adapter
+        )
+        m.edge_rest_angle = torch.tensor(
+            self.edge_rest_angle, dtype=torch.float32, device=adapter
+        )
 
         # ---------------------
         # tetrahedra
 
-        m.tet_indices = torch.tensor(self.tet_indices, dtype=torch.int32, device=adapter)
+        m.tet_indices = torch.tensor(
+            self.tet_indices, dtype=torch.int32, device=adapter
+        )
         m.tet_poses = torch.tensor(self.tet_poses, dtype=torch.float32, device=adapter)
-        m.tet_activations = torch.tensor(self.tet_activations, dtype=torch.float32, device=adapter)
-        m.tet_materials = torch.tensor(self.tet_materials, dtype=torch.float32, device=adapter)
+        m.tet_activations = torch.tensor(
+            self.tet_activations, dtype=torch.float32, device=adapter
+        )
+        m.tet_materials = torch.tensor(
+            self.tet_materials, dtype=torch.float32, device=adapter
+        )
 
         # -----------------------
         # muscles
@@ -1802,11 +1997,21 @@ class ModelBuilder:
         # close the muscle waypoint indices
         self.muscle_start.append(len(self.muscle_links))
 
-        m.muscle_start = torch.tensor(self.muscle_start, dtype=torch.int32, device=adapter)
-        m.muscle_params = torch.tensor(self.muscle_params, dtype=torch.float32, device=adapter)
-        m.muscle_links = torch.tensor(self.muscle_links, dtype=torch.int32, device=adapter)
-        m.muscle_points = torch.tensor(self.muscle_points, dtype=torch.float32, device=adapter)
-        m.muscle_activation = torch.tensor(self.muscle_activation, dtype=torch.float32, device=adapter)
+        m.muscle_start = torch.tensor(
+            self.muscle_start, dtype=torch.int32, device=adapter
+        )
+        m.muscle_params = torch.tensor(
+            self.muscle_params, dtype=torch.float32, device=adapter
+        )
+        m.muscle_links = torch.tensor(
+            self.muscle_links, dtype=torch.int32, device=adapter
+        )
+        m.muscle_points = torch.tensor(
+            self.muscle_points, dtype=torch.float32, device=adapter
+        )
+        m.muscle_activation = torch.tensor(
+            self.muscle_activation, dtype=torch.float32, device=adapter
+        )
 
         # --------------------------------------
         # articulations
@@ -1816,7 +2021,9 @@ class ModelBuilder:
         body_I_m = []
 
         for i in range(len(self.body_inertia)):
-            body_I_m.append(spatial_matrix_from_inertia(self.body_inertia[i], self.body_mass[i]))
+            body_I_m.append(
+                spatial_matrix_from_inertia(self.body_inertia[i], self.body_mass[i])
+            )
             body_X_cm.append(transform(self.body_com[i], quat_identity()))
 
         m.body_I_m = torch.tensor(body_I_m, dtype=torch.float32, device=adapter)
@@ -1848,7 +2055,6 @@ class ModelBuilder:
         articulation_coord_start = []
 
         for i in range(articulation_count):
-
             first_joint = self.articulation_start[i]
             last_joint = self.articulation_start[i + 1]
 
@@ -1878,20 +2084,40 @@ class ModelBuilder:
             m.M_size += 6 * joint_count * 6 * joint_count
             m.H_size += dof_count * dof_count
 
-        m.articulation_joint_start = torch.tensor(self.articulation_start, dtype=torch.int32, device=adapter)
+        m.articulation_joint_start = torch.tensor(
+            self.articulation_start, dtype=torch.int32, device=adapter
+        )
 
         # matrix offsets for batched gemm
-        m.articulation_J_start = torch.tensor(articulation_J_start, dtype=torch.int32, device=adapter)
-        m.articulation_M_start = torch.tensor(articulation_M_start, dtype=torch.int32, device=adapter)
-        m.articulation_H_start = torch.tensor(articulation_H_start, dtype=torch.int32, device=adapter)
+        m.articulation_J_start = torch.tensor(
+            articulation_J_start, dtype=torch.int32, device=adapter
+        )
+        m.articulation_M_start = torch.tensor(
+            articulation_M_start, dtype=torch.int32, device=adapter
+        )
+        m.articulation_H_start = torch.tensor(
+            articulation_H_start, dtype=torch.int32, device=adapter
+        )
 
-        m.articulation_M_rows = torch.tensor(articulation_M_rows, dtype=torch.int32, device=adapter)
-        m.articulation_H_rows = torch.tensor(articulation_H_rows, dtype=torch.int32, device=adapter)
-        m.articulation_J_rows = torch.tensor(articulation_J_rows, dtype=torch.int32, device=adapter)
-        m.articulation_J_cols = torch.tensor(articulation_J_cols, dtype=torch.int32, device=adapter)
+        m.articulation_M_rows = torch.tensor(
+            articulation_M_rows, dtype=torch.int32, device=adapter
+        )
+        m.articulation_H_rows = torch.tensor(
+            articulation_H_rows, dtype=torch.int32, device=adapter
+        )
+        m.articulation_J_rows = torch.tensor(
+            articulation_J_rows, dtype=torch.int32, device=adapter
+        )
+        m.articulation_J_cols = torch.tensor(
+            articulation_J_cols, dtype=torch.int32, device=adapter
+        )
 
-        m.articulation_dof_start = torch.tensor(articulation_dof_start, dtype=torch.int32, device=adapter)
-        m.articulation_coord_start = torch.tensor(articulation_coord_start, dtype=torch.int32, device=adapter)
+        m.articulation_dof_start = torch.tensor(
+            articulation_dof_start, dtype=torch.int32, device=adapter
+        )
+        m.articulation_coord_start = torch.tensor(
+            articulation_coord_start, dtype=torch.int32, device=adapter
+        )
 
         # state (initial)
         m.joint_q = torch.tensor(self.joint_q, dtype=torch.float32, device=adapter)
@@ -1899,24 +2125,52 @@ class ModelBuilder:
 
         # model
         m.joint_type = torch.tensor(self.joint_type, dtype=torch.int32, device=adapter)
-        m.joint_parent = torch.tensor(self.joint_parent, dtype=torch.int32, device=adapter)
-        m.joint_X_pj = torch.tensor(transform_flatten_list(self.joint_X_pj), dtype=torch.float32, device=adapter)
-        m.joint_X_cm = torch.tensor(transform_flatten_list(body_X_cm), dtype=torch.float32, device=adapter)
-        m.joint_axis = torch.tensor(self.joint_axis, dtype=torch.float32, device=adapter)
-        m.joint_q_start = torch.tensor(self.joint_q_start, dtype=torch.int32, device=adapter)
-        m.joint_qd_start = torch.tensor(self.joint_qd_start, dtype=torch.int32, device=adapter)
+        m.joint_parent = torch.tensor(
+            self.joint_parent, dtype=torch.int32, device=adapter
+        )
+        m.joint_X_pj = torch.tensor(
+            transform_flatten_list(self.joint_X_pj), dtype=torch.float32, device=adapter
+        )
+        m.joint_X_cm = torch.tensor(
+            transform_flatten_list(body_X_cm), dtype=torch.float32, device=adapter
+        )
+        m.joint_axis = torch.tensor(
+            self.joint_axis, dtype=torch.float32, device=adapter
+        )
+        m.joint_q_start = torch.tensor(
+            self.joint_q_start, dtype=torch.int32, device=adapter
+        )
+        m.joint_qd_start = torch.tensor(
+            self.joint_qd_start, dtype=torch.int32, device=adapter
+        )
 
         # dynamics properties
-        m.joint_armature = torch.tensor(self.joint_armature, dtype=torch.float32, device=adapter)
+        m.joint_armature = torch.tensor(
+            self.joint_armature, dtype=torch.float32, device=adapter
+        )
 
-        m.joint_target = torch.tensor(self.joint_target, dtype=torch.float32, device=adapter)
-        m.joint_target_ke = torch.tensor(self.joint_target_ke, dtype=torch.float32, device=adapter)
-        m.joint_target_kd = torch.tensor(self.joint_target_kd, dtype=torch.float32, device=adapter)
+        m.joint_target = torch.tensor(
+            self.joint_target, dtype=torch.float32, device=adapter
+        )
+        m.joint_target_ke = torch.tensor(
+            self.joint_target_ke, dtype=torch.float32, device=adapter
+        )
+        m.joint_target_kd = torch.tensor(
+            self.joint_target_kd, dtype=torch.float32, device=adapter
+        )
 
-        m.joint_limit_lower = torch.tensor(self.joint_limit_lower, dtype=torch.float32, device=adapter)
-        m.joint_limit_upper = torch.tensor(self.joint_limit_upper, dtype=torch.float32, device=adapter)
-        m.joint_limit_ke = torch.tensor(self.joint_limit_ke, dtype=torch.float32, device=adapter)
-        m.joint_limit_kd = torch.tensor(self.joint_limit_kd, dtype=torch.float32, device=adapter)
+        m.joint_limit_lower = torch.tensor(
+            self.joint_limit_lower, dtype=torch.float32, device=adapter
+        )
+        m.joint_limit_upper = torch.tensor(
+            self.joint_limit_upper, dtype=torch.float32, device=adapter
+        )
+        m.joint_limit_ke = torch.tensor(
+            self.joint_limit_ke, dtype=torch.float32, device=adapter
+        )
+        m.joint_limit_kd = torch.tensor(
+            self.joint_limit_kd, dtype=torch.float32, device=adapter
+        )
 
         # counts
         m.particle_count = len(self.particle_q)

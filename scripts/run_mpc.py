@@ -22,7 +22,9 @@ def main(cfg: DictConfig):
     cfg.general.render = True
     eval_env = instantiate(cfg.env.config)
 
-    policy: Policy = instantiate(cfg.alg.config.policy, num_actions=env.num_acts, max_steps=env.episode_length)
+    policy: Policy = instantiate(
+        cfg.alg.config.policy, num_actions=env.num_acts, max_steps=env.episode_length
+    )
     planner: Planner = instantiate(cfg.alg.config.planner, env=env, policy=policy)
     rewards = run_planner(planner, eval_env)
 

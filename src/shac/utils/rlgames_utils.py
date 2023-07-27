@@ -39,7 +39,9 @@ def parse_diff_env_kwargs(diff_env):
 
 class RLGPUEnv(vecenv.IVecEnv):
     def __init__(self, config_name, num_actors, **kwargs):
-        self.env = env_configurations.configurations[config_name]["env_creator"](**kwargs)
+        self.env = env_configurations.configurations[config_name]["env_creator"](
+            **kwargs
+        )
 
         self.full_state = {}
 
@@ -49,7 +51,9 @@ class RLGPUEnv(vecenv.IVecEnv):
         print(self.full_state["obs"].shape)
 
     def step(self, actions):
-        self.full_state["obs"], reward, is_done, info = self.env.step(actions.to(self.env.device))
+        self.full_state["obs"], reward, is_done, info = self.env.step(
+            actions.to(self.env.device)
+        )
 
         return (
             self.full_state["obs"].to(self.rl_device),
@@ -89,7 +93,8 @@ class RLGPUEnvAlgoObserver(AlgoObserver):
         device = self.algo.config.get("device", "cuda:0")
 
         self.mean_scores_map = {
-            k + "_final": torch_ext.AverageMeter(1, games_to_track).to(device) for k in self.score_keys
+            k + "_final": torch_ext.AverageMeter(1, games_to_track).to(device)
+            for k in self.score_keys
         }
 
         if hasattr(self.algo, "writer"):
@@ -118,5 +123,9 @@ class RLGPUEnvAlgoObserver(AlgoObserver):
             if score_values.current_size > 0:
                 mean_scores = score_values.get_mean()
                 self.writer.add_scalar(f"scores/{score_key}/step", mean_scores, frame)
-                self.writer.add_scalar(f"scores/{score_key}/iter", mean_scores, epoch_num)
-                self.writer.add_scalar(f"scores/{score_key}/time", mean_scores, total_time)
+                self.writer.add_scalar(
+                    f"scores/{score_key}/iter", mean_scores, epoch_num
+                )
+                self.writer.add_scalar(
+                    f"scores/{score_key}/time", mean_scores, total_time
+                )
