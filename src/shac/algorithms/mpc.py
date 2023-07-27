@@ -59,10 +59,17 @@ class Policy:
             print(params.shape)
             pol = CubicSpline(np.arange(params.shape[0]), params, bc_type="natural")
         elif self.policy_type == "zero":
-            pol = lambda x: params[min(self.max_steps - 1, np.searchsorted(self.timesteps[:-1], x))]
+            pol = lambda x: params[
+                min(self.max_steps - 1, np.searchsorted(self.timesteps[:-1], x))
+            ]
         else:
             assert self.policy_type == "linear"
-            pol = lambda x: np.stack([np.interp(x, self.timesteps, params[:, i]) for i in range(self.num_actions)])
+            pol = lambda x: np.stack(
+                [
+                    np.interp(x, self.timesteps, params[:, i])
+                    for i in range(self.num_actions)
+                ]
+            )
         return pol
 
     def action(self, t, params=None):
@@ -89,7 +96,8 @@ class Planner:
     def optimize_policy(self):
         """Optimize the policy"""
         params = [self.policy.params] + [
-            self.policy.params.copy() + self.noise * np.random.randn(*self.policy.params.shape)
+            self.policy.params.copy()
+            + self.noise * np.random.randn(*self.policy.params.shape)
             for _ in range(self.num_trajectories - 1)
         ]
         policies = [self.policy.get_policy(p) for p in params]
@@ -106,7 +114,9 @@ class Planner:
         """Step the environment, and all parallel envs to the same next state"""
         action = self.policy.action(self.policy.step)
         self.policy.step += self.policy.dt
-        obs, reward, done, info = eval_env.step(torch.tensor(action, dtype=torch.float32, device=eval_env.device))
+        obs, reward, done, info = eval_env.step(
+            torch.tensor(action, dtype=torch.float32, device=eval_env.device)
+        )
         if isinstance(self.env, DFlexEnv):
             joint_q, joint_qd = eval_env.get_state()
             eval_ckpt = CheckpointState(joint_q=joint_q, joint_qd=joint_qd)
@@ -118,9 +128,13 @@ class Planner:
     def clone_state(self, env_idx):
         """Clone the state of the environment"""
         if isinstance(self.env, DFlexEnv):
-            joint_q = self.env.state.joint_q.view(self.num_trajectories, -1)[env_idx : env_idx + 1]
+            joint_q = self.env.state.joint_q.view(self.num_trajectories, -1)[
+                env_idx : env_idx + 1
+            ]
             # joint_q[:] = joint_q[env_idx : env_idx + 1]
-            joint_qd = self.env.state.joint_qd.view(self.num_trajectories, -1)[env_idx : env_idx + 1]
+            joint_qd = self.env.state.joint_qd.view(self.num_trajectories, -1)[
+                env_idx : env_idx + 1
+            ]
             # joint_qd[:] = joint_qd[env_idx : env_idx + 1]
             eval_ckpt = CheckpointState(joint_q=joint_q, joint_qd=joint_qd)
         else:
@@ -133,8 +147,12 @@ class Planner:
 
     def copy_eval_checkpoint(self, eval_ckpt):
         if isinstance(eval_ckpt, CheckpointState):
-            self.env.state.joint_q.view(self.num_trajectories, -1)[:] = eval_ckpt.joint_q.view(1, -1)
-            self.env.state.joint_qd.view(self.num_trajectories, -1)[:] = eval_ckpt.joint_qd.view(1, -1)
+            self.env.state.joint_q.view(self.num_trajectories, -1)[
+                :
+            ] = eval_ckpt.joint_q.view(1, -1)
+            self.env.state.joint_qd.view(self.num_trajectories, -1)[
+                :
+            ] = eval_ckpt.joint_qd.view(1, -1)
         else:
             ckpt = self.env.get_checkpoint()
             for k in ckpt:

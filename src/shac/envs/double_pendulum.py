@@ -77,7 +77,9 @@ class DoublePendulumEnv(DFlexEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
-            filename = os.path.join("outputs", "{:}_{:}.usd".format(self.__class__.__name__, self.num_envs))
+            filename = os.path.join(
+                "outputs", "{:}_{:}.usd".format(self.__class__.__name__, self.num_envs)
+            )
             self.stage = Usd.Stage.CreateNew(filename)
             self.renderer = df.render.UsdRenderer(self.model, self.stage)
             self.renderer.draw_points = True
@@ -123,7 +125,9 @@ class DoublePendulumEnv(DFlexEnv):
 
         self.model = self.builder.finalize(self.device)
         self.model.ground = False
-        self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float, device=self.device)
+        self.model.gravity = torch.tensor(
+            (0.0, -9.81, 0.0), dtype=torch.float, device=self.device
+        )
 
         self.integrator = df.sim.SemiImplicitIntegrator()
 
@@ -149,7 +153,9 @@ class DoublePendulumEnv(DFlexEnv):
             actions = torch.clip(actions, -1.0, 1.0)
             self.actions = actions
 
-            self.state.joint_act.view(self.num_envs, -1)[:, 0:1] = actions * self.action_strength
+            self.state.joint_act.view(self.num_envs, -1)[:, 0:1] = (
+                actions * self.action_strength
+            )
 
             self.state = self.integrator.forward(
                 self.model,
@@ -193,27 +199,39 @@ class DoublePendulumEnv(DFlexEnv):
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:
             if force_reset == True:
-                env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+                env_ids = torch.arange(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
 
         if env_ids is not None:
             # fixed start state
             self.state.joint_q = self.state.joint_q.clone()
             self.state.joint_qd = self.state.joint_qd.clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, :] = self.start_joint_q.view(-1, self.num_joint_q)[
+            self.state.joint_q.view(self.num_envs, -1)[
                 env_ids, :
-            ].clone()
-            self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = self.start_joint_qd.view(-1, self.num_joint_qd)[
+            ] = self.start_joint_q.view(-1, self.num_joint_q)[env_ids, :].clone()
+            self.state.joint_qd.view(self.num_envs, -1)[
                 env_ids, :
-            ].clone()
+            ] = self.start_joint_qd.view(-1, self.num_joint_qd)[env_ids, :].clone()
 
             if self.stochastic_init:
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, :] = self.state.joint_q.view(self.num_envs, -1)[
+                self.state.joint_q.view(self.num_envs, -1)[
                     env_ids, :
-                ] + np.pi * (torch.rand(size=(len(env_ids), self.num_joint_q), device=self.device) - 0.5)
+                ] = self.state.joint_q.view(self.num_envs, -1)[env_ids, :] + np.pi * (
+                    torch.rand(
+                        size=(len(env_ids), self.num_joint_q), device=self.device
+                    )
+                    - 0.5
+                )
 
-                self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = self.state.joint_qd.view(self.num_envs, -1)[
+                self.state.joint_qd.view(self.num_envs, -1)[
                     env_ids, :
-                ] + 0.5 * (torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5)
+                ] = self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] + 0.5 * (
+                    torch.rand(
+                        size=(len(env_ids), self.num_joint_qd), device=self.device
+                    )
+                    - 0.5
+                )
 
             self.progress_buf[env_ids] = 0
 
@@ -252,7 +270,9 @@ class DoublePendulumEnv(DFlexEnv):
         theta_dot = self.state.joint_qd.view(self.num_envs, -1)[:, 1:]
 
         # observations: [x, xdot, sin(theta), cos(theta), theta_dot]
-        self.obs_buf = torch.cat([x, xdot, torch.sin(theta), torch.cos(theta), theta_dot], dim=-1)
+        self.obs_buf = torch.cat(
+            [x, xdot, torch.sin(theta), torch.cos(theta), theta_dot], dim=-1
+        )
 
     def calculateReward(self):
         x = self.state.joint_q.view(self.num_envs, -1)[:, 0]

@@ -42,7 +42,7 @@ def main(config: DictConfig):
         new_actor.eval()
         policies.append(new_actor)
     fmodel, params, buffers = combine_state_for_ensamble(policies)
-    [p.requires_grad_() for p in params];
+    [p.requires_grad_() for p in params]
     print("Loaded policies")
 
     def policy(obs: torch.Tensor):
@@ -56,8 +56,8 @@ def main(config: DictConfig):
         # post process observations
         # actions = []
         # for i in range(obs.shape[0]):
-            # a = policies[i](obs[i], deterministic=True)
-            # actions.append(a)
+        # a = policies[i](obs[i], deterministic=True)
+        # actions.append(a)
         # actions = torch.stack(actions)
         assert actions.shape == (N, m), actions.shape
         return actions
@@ -83,7 +83,6 @@ def main(config: DictConfig):
 
         # let episode play out
         for t in range(0, h):
-
             start = time()
             # Accumulate ZoBGs along the way
             # compute policy gradients along the way for FoBGs later
@@ -93,7 +92,7 @@ def main(config: DictConfig):
             # reshape parameters into the shapes we want them in
             dpi = []
             for i in range(N):
-                dpi_per_batch = grads[i*10: (i+1)*10]
+                dpi_per_batch = grads[i * 10 : (i + 1) * 10]
                 dpi_per_batch = [each.flatten() for each in dpi_per_batch]
                 dpi_per_batch = torch.concat(dpi_per_batch)
                 dpi.append(dpi_per_batch)
@@ -146,7 +145,7 @@ def main(config: DictConfig):
         assert zobg.shape == (N, o), zobg.shape
         zobgs.append(zobg.detach().cpu().numpy())
         duration = time() - start
-        print("ZoBG took {:.3f}s",format(duration))
+        print("ZoBG took {:.3f}s", format(duration))
 
         # Now get ZoBGs without poliy gradients
         # policy_grad = w[:h].sum(0)  # without policy gradients

@@ -82,7 +82,15 @@ class SNUHumanoidEnv(DFlexEnv):
             num_act = self.num_muscles
 
         super(SNUHumanoidEnv, self).__init__(
-            num_envs, num_obs, num_act, episode_length, MM_caching_frequency, seed, no_grad, render, device
+            num_envs,
+            num_obs,
+            num_act,
+            episode_length,
+            MM_caching_frequency,
+            seed,
+            no_grad,
+            render,
+            device,
         )
 
         self.stochastic_init = stochastic_init
@@ -100,7 +108,13 @@ class SNUHumanoidEnv(DFlexEnv):
         # -----------------------
         # set up Usd renderer
         if self.visualize:
-            self.stage = Usd.Stage.CreateNew("outputs/" + self.name + "HumanoidSNU_Low_" + str(self.num_envs) + ".usd")
+            self.stage = Usd.Stage.CreateNew(
+                "outputs/"
+                + self.name
+                + "HumanoidSNU_Low_"
+                + str(self.num_envs)
+                + ".usd"
+            )
 
             self.renderer = df.render.UsdRenderer(self.model, self.stage)
             self.renderer.draw_points = True
@@ -118,31 +132,35 @@ class SNUHumanoidEnv(DFlexEnv):
 
         self.ground = True
 
-        self.x_unit_tensor = tu.to_torch([1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
-        self.y_unit_tensor = tu.to_torch([0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
-        self.z_unit_tensor = tu.to_torch([0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
+        self.x_unit_tensor = tu.to_torch(
+            [1, 0, 0], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
+        self.y_unit_tensor = tu.to_torch(
+            [0, 1, 0], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
+        self.z_unit_tensor = tu.to_torch(
+            [0, 0, 1], dtype=torch.float, device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
 
         self.start_rot = df.quat_from_axis_angle((0.0, 1.0, 0.0), math.pi * 0.5)
-        self.start_rotation = tu.to_torch(self.start_rot, device=self.device, requires_grad=False)
+        self.start_rotation = tu.to_torch(
+            self.start_rot, device=self.device, requires_grad=False
+        )
 
         # initialize some data used later on
         # todo - switch to z-up
         self.up_vec = self.y_unit_tensor.clone()
         self.heading_vec = self.x_unit_tensor.clone()
-        self.inv_start_rot = tu.quat_conjugate(self.start_rotation).repeat((self.num_envs, 1))
+        self.inv_start_rot = tu.quat_conjugate(self.start_rotation).repeat(
+            (self.num_envs, 1)
+        )
 
         self.basis_vec0 = self.heading_vec.clone()
         self.basis_vec1 = self.up_vec.clone()
 
-        self.targets = tu.to_torch([10000.0, 0.0, 0.0], device=self.device, requires_grad=False).repeat(
-            (self.num_envs, 1)
-        )
+        self.targets = tu.to_torch(
+            [10000.0, 0.0, 0.0], device=self.device, requires_grad=False
+        ).repeat((self.num_envs, 1))
 
         self.start_pos = []
 
@@ -195,7 +213,9 @@ class SNUHumanoidEnv(DFlexEnv):
             self.builder.joint_q[skeleton.coord_start + 2] = i * self.env_dist
             self.builder.joint_q[skeleton.coord_start + 1] = start_height
 
-            self.builder.joint_q[skeleton.coord_start + 3 : skeleton.coord_start + 7] = self.start_rot
+            self.builder.joint_q[
+                skeleton.coord_start + 3 : skeleton.coord_start + 7
+            ] = self.start_rot
 
             self.start_pos.append(
                 [
@@ -224,16 +244,22 @@ class SNUHumanoidEnv(DFlexEnv):
         for mi in range(len(self.muscle_strengths)):
             self.muscle_strengths[mi] = self.str_scale * self.muscle_strengths[mi]
 
-        self.muscle_strengths = tu.to_torch(self.muscle_strengths, device=self.device).repeat(self.num_envs)
+        self.muscle_strengths = tu.to_torch(
+            self.muscle_strengths, device=self.device
+        ).repeat(self.num_envs)
 
         self.start_pos = tu.to_torch(self.start_pos, device=self.device)
         self.start_joint_q = tu.to_torch(self.start_joint_q, device=self.device)
-        self.start_joint_target = tu.to_torch(self.start_joint_target, device=self.device)
+        self.start_joint_target = tu.to_torch(
+            self.start_joint_target, device=self.device
+        )
 
         # finalize model
         self.model = self.builder.finalize(self.device)
         self.model.ground = self.ground
-        self.model.gravity = torch.tensor((0.0, -9.81, 0.0), dtype=torch.float32, device=self.device)
+        self.model.gravity = torch.tensor(
+            (0.0, -9.81, 0.0), dtype=torch.float32, device=self.device
+        )
 
         self.integrator = df.sim.SemiImplicitIntegrator()
 
@@ -251,11 +277,17 @@ class SNUHumanoidEnv(DFlexEnv):
                 for s in self.skeletons:
                     for mesh, link in s.mesh_map.items():
                         if link != -1:
-                            X_sc = df.transform_expand(self.state.body_X_sc[link].tolist())
+                            X_sc = df.transform_expand(
+                                self.state.body_X_sc[link].tolist()
+                            )
 
-                            mesh_path = os.path.join(self.asset_folder, "OBJ/" + mesh + ".usd")
+                            mesh_path = os.path.join(
+                                self.asset_folder, "OBJ/" + mesh + ".usd"
+                            )
 
-                            self.renderer.add_mesh(mesh, mesh_path, X_sc, 1.0, self.render_time)
+                            self.renderer.add_mesh(
+                                mesh, mesh_path, X_sc, 1.0, self.render_time
+                            )
 
                     for m in range(len(s.muscles)):
                         start = self.model.muscle_start[muscle_start + m].item()
@@ -267,15 +299,24 @@ class SNUHumanoidEnv(DFlexEnv):
                             link = self.model.muscle_links[w].item()
                             point = self.model.muscle_points[w].cpu().numpy()
 
-                            X_sc = df.transform_expand(self.state.body_X_sc[link].cpu().tolist())
+                            X_sc = df.transform_expand(
+                                self.state.body_X_sc[link].cpu().tolist()
+                            )
 
-                            points.append(Gf.Vec3f(df.transform_point(X_sc, point).tolist()))
+                            points.append(
+                                Gf.Vec3f(df.transform_point(X_sc, point).tolist())
+                            )
 
                         self.renderer.add_line_strip(
                             points,
                             name=s.muscles[m].name + str(skel_index),
                             radius=0.0075,
-                            color=(self.model.muscle_activation[muscle_start + m] / self.muscle_strengths[m], 0.2, 0.5),
+                            color=(
+                                self.model.muscle_activation[muscle_start + m]
+                                / self.muscle_strengths[m],
+                                0.2,
+                                0.5,
+                            ),
                             time=self.render_time,
                         )
 
@@ -320,10 +361,16 @@ class SNUHumanoidEnv(DFlexEnv):
             if self.mtu_actuations:
                 self.model.muscle_activation = actions.view(-1) * self.muscle_strengths
             else:
-                self.state.joint_act.view(self.num_envs, -1)[:, 6:] = actions * self.action_strength
+                self.state.joint_act.view(self.num_envs, -1)[:, 6:] = (
+                    actions * self.action_strength
+                )
 
             self.state = self.integrator.forward(
-                self.model, self.state, self.sim_dt, self.sim_substeps, self.MM_caching_frequency
+                self.model,
+                self.state,
+                self.sim_dt,
+                self.sim_substeps,
+                self.MM_caching_frequency,
             )
             self.sim_time += self.sim_dt
 
@@ -339,7 +386,10 @@ class SNUHumanoidEnv(DFlexEnv):
 
         if self.no_grad == False:
             self.obs_buf_before_reset = self.obs_buf.clone()
-            self.extras = {"obs_before_reset": self.obs_buf_before_reset, "episode_end": self.termination_buf}
+            self.extras = {
+                "obs_before_reset": self.obs_buf_before_reset,
+                "episode_end": self.termination_buf,
+            }
 
         if len(env_ids) > 0:
             self.reset(env_ids)
@@ -352,7 +402,9 @@ class SNUHumanoidEnv(DFlexEnv):
     def reset(self, env_ids=None, force_reset=True):
         if env_ids is None:
             if force_reset == True:
-                env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+                env_ids = torch.arange(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
 
         if env_ids is not None:
             # clone the state to avoid gradient error
@@ -360,24 +412,40 @@ class SNUHumanoidEnv(DFlexEnv):
             self.state.joint_qd = self.state.joint_qd.clone()
 
             # fixed start state
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.start_pos[env_ids, :].clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = self.start_rotation.clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:] = self.start_joint_q.clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.start_pos[
+                env_ids, :
+            ].clone()
+            self.state.joint_q.view(self.num_envs, -1)[
+                env_ids, 3:7
+            ] = self.start_rotation.clone()
+            self.state.joint_q.view(self.num_envs, -1)[
+                env_ids, 7:
+            ] = self.start_joint_q.clone()
             self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.0
 
             # randomization
             if self.stochastic_init:
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = (
                     self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3]
-                    + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.0
+                    + 0.1
+                    * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5)
+                    * 2.0
                 )
-                angle = (torch.rand(len(env_ids), device=self.device) - 0.5) * np.pi / 12.0
-                axis = torch.nn.functional.normalize(torch.rand((len(env_ids), 3), device=self.device) - 0.5)
+                angle = (
+                    (torch.rand(len(env_ids), device=self.device) - 0.5) * np.pi / 12.0
+                )
+                axis = torch.nn.functional.normalize(
+                    torch.rand((len(env_ids), 3), device=self.device) - 0.5
+                )
                 self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = tu.quat_mul(
-                    self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7], tu.quat_from_angle_axis(angle, axis)
+                    self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7],
+                    tu.quat_from_angle_axis(angle, axis),
                 )
                 self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (
-                    torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5
+                    torch.rand(
+                        size=(len(env_ids), self.num_joint_qd), device=self.device
+                    )
+                    - 0.5
                 )
 
             # clear action
@@ -458,7 +526,8 @@ class SNUHumanoidEnv(DFlexEnv):
                 lin_vel,  # 5:8
                 ang_vel,  # 8:11
                 self.state.joint_q.view(self.num_envs, -1)[:, 7:],  # 11:33
-                self.joint_vel_obs_scaling * self.state.joint_qd.view(self.num_envs, -1)[:, 6:],  # 33:51
+                self.joint_vel_obs_scaling
+                * self.state.joint_qd.view(self.num_envs, -1)[:, 6:],  # 33:51
                 up_vec[:, 1:2],  # 51
                 (heading_vec * target_dirs).sum(dim=-1).unsqueeze(-1),
             ],  # 52
@@ -469,12 +538,16 @@ class SNUHumanoidEnv(DFlexEnv):
         up_reward = 0.1 * self.obs_buf[:, 51]
         heading_reward = self.obs_buf[:, 52]
 
-        height_diff = self.obs_buf[:, 0] - (self.termination_height + self.termination_tolerance)
+        height_diff = self.obs_buf[:, 0] - (
+            self.termination_height + self.termination_tolerance
+        )
         height_reward = torch.clip(height_diff, -1.0, self.termination_tolerance)
         height_reward = torch.where(
             height_reward < 0.0, -200.0 * height_reward * height_reward, height_reward
         )  # JIE: not smooth
-        height_reward = torch.where(height_reward > 0.0, self.height_rew_scale * height_reward, height_reward)
+        height_reward = torch.where(
+            height_reward > 0.0, self.height_rew_scale * height_reward, height_reward
+        )
 
         act_penalty = (
             torch.sum(torch.abs(self.actions), dim=-1) * self.action_penalty
@@ -486,33 +559,51 @@ class SNUHumanoidEnv(DFlexEnv):
 
         # reset agents
         self.reset_buf = torch.where(
-            self.obs_buf[:, 0] < self.termination_height, torch.ones_like(self.reset_buf), self.reset_buf
+            self.obs_buf[:, 0] < self.termination_height,
+            torch.ones_like(self.reset_buf),
+            self.reset_buf,
         )
         self.reset_buf = torch.where(
-            self.progress_buf > self.episode_length - 1, torch.ones_like(self.reset_buf), self.reset_buf
+            self.progress_buf > self.episode_length - 1,
+            torch.ones_like(self.reset_buf),
+            self.reset_buf,
         )
 
         # an ugly fix for simulation nan values
         nan_masks = torch.logical_or(
             torch.isnan(self.obs_buf).sum(-1) > 0,
             torch.logical_or(
-                torch.isnan(self.state.joint_q.view(self.num_environments, -1)).sum(-1) > 0,
-                torch.isnan(self.state.joint_qd.view(self.num_environments, -1)).sum(-1) > 0,
+                torch.isnan(self.state.joint_q.view(self.num_environments, -1)).sum(-1)
+                > 0,
+                torch.isnan(self.state.joint_qd.view(self.num_environments, -1)).sum(-1)
+                > 0,
             ),
         )
         inf_masks = torch.logical_or(
             torch.isinf(self.obs_buf).sum(-1) > 0,
             torch.logical_or(
-                torch.isinf(self.state.joint_q.view(self.num_environments, -1)).sum(-1) > 0,
-                torch.isinf(self.state.joint_qd.view(self.num_environments, -1)).sum(-1) > 0,
+                torch.isinf(self.state.joint_q.view(self.num_environments, -1)).sum(-1)
+                > 0,
+                torch.isinf(self.state.joint_qd.view(self.num_environments, -1)).sum(-1)
+                > 0,
             ),
         )
         invalid_value_masks = torch.logical_or(
-            (torch.abs(self.state.joint_q.view(self.num_environments, -1)) > 1e6).sum(-1) > 0,
-            (torch.abs(self.state.joint_qd.view(self.num_environments, -1)) > 1e6).sum(-1) > 0,
+            (torch.abs(self.state.joint_q.view(self.num_environments, -1)) > 1e6).sum(
+                -1
+            )
+            > 0,
+            (torch.abs(self.state.joint_qd.view(self.num_environments, -1)) > 1e6).sum(
+                -1
+            )
+            > 0,
         )
-        invalid_masks = torch.logical_or(invalid_value_masks, torch.logical_or(nan_masks, inf_masks))
+        invalid_masks = torch.logical_or(
+            invalid_value_masks, torch.logical_or(nan_masks, inf_masks)
+        )
 
-        self.reset_buf = torch.where(invalid_masks, torch.ones_like(self.reset_buf), self.reset_buf)
+        self.reset_buf = torch.where(
+            invalid_masks, torch.ones_like(self.reset_buf), self.reset_buf
+        )
 
         self.rew_buf[invalid_masks] = 0.0

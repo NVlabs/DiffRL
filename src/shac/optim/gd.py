@@ -39,7 +39,7 @@ class GD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            for p in group['params']:
-                p.add_(p.grad, alpha = -group['lr'])
-        
+            for p in group["params"]:
+                p.add_(p.grad, alpha=-group["lr"])
+
         return loss

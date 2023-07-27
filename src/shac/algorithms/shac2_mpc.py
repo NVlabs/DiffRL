@@ -82,19 +82,27 @@ class SHAC:
         self.is_linear_lr = self.lr_schedule == "linear"
 
         if self.is_adaptive_lr:
-            self.scheduler = instantiate(cfg["alg"]["params"]["default_adaptive_scheduler"])
+            self.scheduler = instantiate(
+                cfg["alg"]["params"]["default_adaptive_scheduler"]
+            )
         elif self.is_linear_lr:
-            self.scheduler = instantiate(cfg["alg"]["params"]["default_linear_scheduler"])
+            self.scheduler = instantiate(
+                cfg["alg"]["params"]["default_linear_scheduler"]
+            )
         else:
             self.scheduler = schedulers.IdentityScheduler()
 
-        self.target_critic_alpha = cfg["alg"]["params"]["config"].get("target_critic_alpha", 0.4)
+        self.target_critic_alpha = cfg["alg"]["params"]["config"].get(
+            "target_critic_alpha", 0.4
+        )
 
         self._obs_rms = None
         self.curr_epoch = 0
         self.sub_traj_per_epoch = math.ceil(self.max_episode_length / self.steps_num)
         # number of epochs of no improvement for early stopping
-        self.early_stopping_patience = cfg["alg"]["params"]["config"].get("early_stopping_patience", self.max_epochs)
+        self.early_stopping_patience = cfg["alg"]["params"]["config"].get(
+            "early_stopping_patience", self.max_epochs
+        )
         if cfg["alg"]["params"]["config"].get("obs_rms", False):
             # generate obs_rms for each subtrajectory
             self._obs_rms = [
@@ -108,7 +116,9 @@ class SHAC:
 
         self.rew_scale = cfg["alg"]["params"]["config"].get("rew_scale", 1.0)
 
-        self.critic_iterations = cfg["alg"]["params"]["config"].get("critic_iterations", 16)
+        self.critic_iterations = cfg["alg"]["params"]["config"].get(
+            "critic_iterations", 16
+        )
         self.num_batch = cfg["alg"]["params"]["config"].get("num_batch", 4)
         self.batch_size = self.num_envs * self.steps_num // self.num_batch
         self.name = cfg["alg"]["params"]["config"]
@@ -125,7 +135,9 @@ class SHAC:
                 yaml.dump(save_cfg, open(os.path.join(self.log_dir, "cfg.yaml"), "w"))
                 self.writer = SummaryWriter(os.path.join(self.log_dir, "log"))
             # save interval
-            self.save_interval = cfg["alg"]["params"]["config"].get("save_interval", 500)
+            self.save_interval = cfg["alg"]["params"]["config"].get(
+                "save_interval", 500
+            )
             # stochastic inference
             self.stochastic_evaluation = True
         else:
@@ -153,16 +165,20 @@ class SHAC:
 
         # initialize optimizer
         self.actor_optimizer = instantiate(
-            cfg["alg"]["params"]["config"]["actor_optimizer"], params=self.actor.parameters()
+            cfg["alg"]["params"]["config"]["actor_optimizer"],
+            params=self.actor.parameters(),
         )
         self.critic_optimizer = instantiate(
-            cfg["alg"]["params"]["config"]["critic_optimizer"], params=self.critic.parameters()
+            cfg["alg"]["params"]["config"]["critic_optimizer"],
+            params=self.critic.parameters(),
         )
 
         if cfg["general"]["train"]:
             self.save("init_policy")
 
-        self.mixed_precision = cfg["alg"]["params"]["config"].get("mixed_precision", False)
+        self.mixed_precision = cfg["alg"]["params"]["config"].get(
+            "mixed_precision", False
+        )
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
 
         # replay buffer
@@ -171,10 +187,18 @@ class SHAC:
             dtype=torch.float32,
             device=self.device,
         )
-        self.rew_buf = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.done_mask = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.next_values = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
-        self.target_values = torch.zeros((self.steps_num, self.num_envs), dtype=torch.float32, device=self.device)
+        self.rew_buf = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.done_mask = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.next_values = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        self.target_values = torch.zeros(
+            (self.steps_num, self.num_envs), dtype=torch.float32, device=self.device
+        )
         self.ret = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
 
         # for kl divergence computing
@@ -207,9 +231,15 @@ class SHAC:
         self.episode_length_his = []
         self.episode_loss_his = []
         self.episode_discounted_loss_his = []
-        self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
         self.best_policy_loss = np.inf
         self.best_policy_epoch = 0
@@ -222,7 +252,8 @@ class SHAC:
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
         self.score_keys = cfg["alg"]["params"]["config"].get("score_keys", [])
         self.episode_scores_meter_map = {
-            key + "_final": AverageMeter(1, 100).to(self.device) for key in self.score_keys
+            key + "_final": AverageMeter(1, 100).to(self.device)
+            for key in self.score_keys
         }
 
         # timer
@@ -235,15 +266,21 @@ class SHAC:
         return self._obs_rms[0]  # self.curr_epoch % self.sub_traj_per_epoch]
 
     def compute_actor_loss(self, deterministic=False):
-        rew_acc = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
+        rew_acc = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
         gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        next_values = torch.zeros((self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device)
+        next_values = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
         next_values_model_free = torch.zeros(
             (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
         )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
-        actor_model_free_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        actor_model_free_loss = torch.tensor(
+            0.0, dtype=torch.float32, device=self.device
+        )
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -266,7 +303,9 @@ class SHAC:
                 self.obs_buf[i] = obs.clone()
 
             actions = self.actor(obs, deterministic=deterministic)
-            self.mus[i, :], _, self.sigmas[i, :] = self.actor.forward_with_dist(obs, deterministic=False)
+            self.mus[i, :], _, self.sigmas[i, :] = self.actor.forward_with_dist(
+                obs, deterministic=False
+            )
 
             obs, rew, done, extra_info = self.env.step(torch.tanh(actions))
 
@@ -295,7 +334,9 @@ class SHAC:
 
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
-            next_values[i + 1] = torch.minimum(self.critic(obs).squeeze(-1), self.target_critic(obs).squeeze(-1))
+            next_values[i + 1] = torch.minimum(
+                self.critic(obs).squeeze(-1), self.target_critic(obs).squeeze(-1)
+            )
             next_values_model_free[i + 1] = torch.minimum(
                 self.critic(obs.requires_grad_(False)).squeeze(-1),
                 self.target_critic(obs.require_grad_(False)).squeeze(-1),
@@ -308,7 +349,9 @@ class SHAC:
                     or (torch.abs(extra_info["obs_before_reset"][id]) > 1e6).sum() > 0
                 ):  # ugly fix for nan values
                     next_values[i + 1, id] = 0.0
-                elif self.episode_length[id] < self.max_episode_length:  # early termination
+                elif (
+                    self.episode_length[id] < self.max_episode_length
+                ):  # early termination
                     next_values[i + 1, id] = 0.0
                 else:  # otherwise, use terminal value critic to estimate the long-term performance
                     if self.obs_rms is not None:
@@ -320,7 +363,9 @@ class SHAC:
                         self.target_critic(real_obs).squeeze(-1),
                     )
 
-            if (next_values[i + 1] > 1e6).sum() > 0 or (next_values[i + 1] < -1e6).sum() > 0:
+            if (next_values[i + 1] > 1e6).sum() > 0 or (
+                next_values[i + 1] < -1e6
+            ).sum() > 0:
                 print("next value error")
                 if self.multi_gpu:
                     dist.destroy_process_group()
@@ -330,17 +375,25 @@ class SHAC:
 
             if i < self.steps_num - 1:
                 actor_loss += (
-                    -rew_acc[i + 1, done_env_ids] - self.gamma * gamma[done_env_ids] * next_values[i + 1, done_env_ids]
+                    -rew_acc[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values[i + 1, done_env_ids]
                 ).sum()
                 actor_model_free_loss += (
                     -rew_acc[i + 1, done_env_ids].detach()
-                    - self.gamma * gamma[done_env_ids] * next_values_model_free[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values_model_free[i + 1, done_env_ids]
                 ).sum()
             else:
                 # terminate all envs at the end of optimization iteration
-                actor_loss += (-rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]).sum()
+                actor_loss += (
+                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
+                ).sum()
                 actor_model_free_loss += (
-                    -rew_acc[i + 1, :].detach() - self.gamma * gamma * next_values_model_free[i + 1, :]
+                    -rew_acc[i + 1, :].detach()
+                    - self.gamma * gamma * next_values_model_free[i + 1, :]
                 ).sum()
 
             # compute gamma for next step
@@ -366,20 +419,35 @@ class SHAC:
                 self.episode_gamma *= self.gamma
                 if len(done_env_ids) > 0:
                     self.episode_loss_meter.update(self.episode_loss[done_env_ids])
-                    self.episode_discounted_loss_meter.update(self.episode_discounted_loss[done_env_ids])
+                    self.episode_discounted_loss_meter.update(
+                        self.episode_discounted_loss[done_env_ids]
+                    )
                     self.episode_length_meter.update(self.episode_length[done_env_ids])
-                    for k, v in filter(lambda x: x[0] in self.score_keys, extra_info.items()):
-                        self.episode_scores_meter_map[k + "_final"].update(v[done_env_ids])
+                    for k, v in filter(
+                        lambda x: x[0] in self.score_keys, extra_info.items()
+                    ):
+                        self.episode_scores_meter_map[k + "_final"].update(
+                            v[done_env_ids]
+                        )
                     for done_env_id in done_env_ids:
-                        if self.episode_loss[done_env_id] > 1e6 or self.episode_loss[done_env_id] < -1e6:
+                        if (
+                            self.episode_loss[done_env_id] > 1e6
+                            or self.episode_loss[done_env_id] < -1e6
+                        ):
                             print("ep loss error")
                             if self.multi_gpu:
                                 dist.destroy_process_group()
                             raise ValueError
 
-                        self.episode_loss_his.append(self.episode_loss[done_env_id].item())
-                        self.episode_discounted_loss_his.append(self.episode_discounted_loss[done_env_id].item())
-                        self.episode_length_his.append(self.episode_length[done_env_id].item())
+                        self.episode_loss_his.append(
+                            self.episode_loss[done_env_id].item()
+                        )
+                        self.episode_discounted_loss_his.append(
+                            self.episode_discounted_loss[done_env_id].item()
+                        )
+                        self.episode_length_his.append(
+                            self.episode_length[done_env_id].item()
+                        )
                         self.episode_loss[done_env_id] = 0.0
                         self.episode_discounted_loss[done_env_id] = 0.0
                         self.episode_length[done_env_id] = 0
@@ -404,10 +472,16 @@ class SHAC:
         episode_length_his = []
         episode_loss_his = []
         episode_discounted_loss_his = []
-        episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         episode_length = torch.zeros(self.num_envs, dtype=int)
-        episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-        episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
         obs = self.env.reset()
 
@@ -436,7 +510,9 @@ class SHAC:
                         )
                     )
                     episode_loss_his.append(episode_loss[done_env_id].item())
-                    episode_discounted_loss_his.append(episode_discounted_loss[done_env_id].item())
+                    episode_discounted_loss_his.append(
+                        episode_discounted_loss[done_env_id].item()
+                    )
                     episode_length_his.append(episode_length[done_env_id].item())
                     episode_loss[done_env_id] = 0.0
                     episode_discounted_loss[done_env_id] = 0.0
@@ -466,7 +542,11 @@ class SHAC:
                     + (1.0 - lam) / (1.0 - self.lam) * self.rew_buf[i]
                 )
                 Bi = (
-                    self.gamma * (self.next_values[i] * self.done_mask[i] + Bi * (1.0 - self.done_mask[i]))
+                    self.gamma
+                    * (
+                        self.next_values[i] * self.done_mask[i]
+                        + Bi * (1.0 - self.done_mask[i])
+                    )
                     + self.rew_buf[i]
                 )
                 self.target_values[i] = (1.0 - self.lam) * Ai + lam * Bi
@@ -490,7 +570,9 @@ class SHAC:
             mean_policy_loss,
             mean_policy_discounted_loss,
             mean_episode_length,
-        ) = self.evaluate_policy(num_games=num_games, deterministic=not self.stochastic_evaluation)
+        ) = self.evaluate_policy(
+            num_games=num_games, deterministic=not self.stochastic_evaluation
+        )
         print_info(
             "mean episode loss = {}, mean discounted loss = {}, mean episode length = {}".format(
                 mean_policy_loss, mean_policy_discounted_loss, mean_episode_length
@@ -529,10 +611,16 @@ class SHAC:
             if self.rank == 0:
                 print("done broadcasting parameters====================")
 
-        self.episode_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_discounted_loss = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self.episode_discounted_loss = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
         self.episode_length = torch.zeros(self.num_envs, dtype=int)
-        self.episode_gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
+        self.episode_gamma = torch.ones(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
         def actor_closure():
             self.actor_optimizer.zero_grad(set_to_none=True)
@@ -554,11 +642,16 @@ class SHAC:
             with torch.no_grad():
                 self.scaler.unscale_(self.actor_optimizer)
                 self.grad_norm_before_clip = tu.grad_norm(self.actor.parameters())
-                self.truncate_gradients_and_step(self.actor.parameters(), self.actor_optimizer, unscale=False)
+                self.truncate_gradients_and_step(
+                    self.actor.parameters(), self.actor_optimizer, unscale=False
+                )
                 self.grad_norm_after_clip = tu.grad_norm(self.actor.parameters())
 
                 # sanity check
-                if torch.isnan(self.grad_norm_before_clip) or self.grad_norm_before_clip > 1000000.0:
+                if (
+                    torch.isnan(self.grad_norm_before_clip)
+                    or self.grad_norm_before_clip > 1000000.0
+                ):
                     print("shac training crashed due to unstable gradient")
                     # torch.save(env_state, os.path.join(self.log_dir, "bad_state.pt"))
                     print("NaN gradient")
@@ -583,8 +676,12 @@ class SHAC:
             # learning rate schedule
             if self.lr_schedule == "linear":
                 if self.rank == 0:
-                    actor_lr, _ = self.scheduler.update(actor_lr, None, self.curr_epoch, None, None)
-                    critic_lr, _ = self.scheduler.update(critic_lr, None, self.curr_epoch, None, None)
+                    actor_lr, _ = self.scheduler.update(
+                        actor_lr, None, self.curr_epoch, None, None
+                    )
+                    critic_lr, _ = self.scheduler.update(
+                        critic_lr, None, self.curr_epoch, None, None
+                    )
 
                 if self.multi_gpu:
                     lr_tensor = torch.tensor([actor_lr, critic_lr], device=self.device)
@@ -628,7 +725,9 @@ class SHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                dataset = CriticDataset(self.batch_size, self.obs_buf, self.target_values, drop_last=False)
+                dataset = CriticDataset(
+                    self.batch_size, self.obs_buf, self.target_values, drop_last=False
+                )
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")
@@ -647,14 +746,18 @@ class SHAC:
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    self.truncate_gradients_and_step(self.critic.parameters(), self.critic_optimizer)
+                    self.truncate_gradients_and_step(
+                        self.critic.parameters(), self.critic_optimizer
+                    )
 
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
 
                 self.value_loss = (total_critic_loss / batch_cnt).detach().cpu().item()
                 print(
-                    "value iter {}/{}, loss = {:7.6f}".format(j + 1, self.critic_iterations, self.value_loss),
+                    "value iter {}/{}, loss = {:7.6f}".format(
+                        j + 1, self.critic_iterations, self.value_loss
+                    ),
                     end="\r",
                 )
 
@@ -668,7 +771,9 @@ class SHAC:
             # update target critic
             with torch.no_grad():
                 alpha = self.target_critic_alpha
-                for param, param_targ in zip(self.critic.parameters(), self.target_critic.parameters()):
+                for param, param_targ in zip(
+                    self.critic.parameters(), self.target_critic.parameters()
+                ):
                     param_targ.data.mul_(alpha)
                     param_targ.data.add_((1.0 - alpha) * param.data)
 
@@ -685,10 +790,14 @@ class SHAC:
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
-                mean_policy_discounted_loss = self.episode_discounted_loss_meter.get_mean()
+                mean_policy_discounted_loss = (
+                    self.episode_discounted_loss_meter.get_mean()
+                )
 
                 if mean_policy_loss < self.best_policy_loss:
-                    print_info("save best policy with loss {:.2f}".format(mean_policy_loss))
+                    print_info(
+                        "save best policy with loss {:.2f}".format(mean_policy_loss)
+                    )
                     self.save()
                     self.best_policy_loss = mean_policy_loss
                     self.best_policy_epoch = self.curr_epoch
@@ -698,18 +807,42 @@ class SHAC:
                     if last_improved_ep > self.early_stopping_patience:
                         should_exit = True
 
-                self.writer.add_scalar("policy_loss/step", mean_policy_loss, self.step_count)
-                self.writer.add_scalar("policy_loss/time", mean_policy_loss, time_elapse)
-                self.writer.add_scalar("policy_loss/iter", mean_policy_loss, self.iter_count)
-                self.writer.add_scalar("rewards/step", -mean_policy_loss, self.step_count)
+                self.writer.add_scalar(
+                    "policy_loss/step", mean_policy_loss, self.step_count
+                )
+                self.writer.add_scalar(
+                    "policy_loss/time", mean_policy_loss, time_elapse
+                )
+                self.writer.add_scalar(
+                    "policy_loss/iter", mean_policy_loss, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "rewards/step", -mean_policy_loss, self.step_count
+                )
                 self.writer.add_scalar("rewards/time", -mean_policy_loss, time_elapse)
-                self.writer.add_scalar("rewards/iter", -mean_policy_loss, self.iter_count)
-                if self.score_keys and len(self.episode_scores_meter_map[self.score_keys[0] + "_final"]) > 0:
+                self.writer.add_scalar(
+                    "rewards/iter", -mean_policy_loss, self.iter_count
+                )
+                if (
+                    self.score_keys
+                    and len(
+                        self.episode_scores_meter_map[self.score_keys[0] + "_final"]
+                    )
+                    > 0
+                ):
                     for score_key in self.score_keys:
-                        score = self.episode_scores_meter_map[score_key + "_final"].get_mean()
-                        self.writer.add_scalar("scores/{}/iter".format(score_key), score, self.iter_count)
-                        self.writer.add_scalar("scores/{}/step".format(score_key), score, self.step_count)
-                        self.writer.add_scalar("scores/{}/time".format(score_key), score, time_elapse)
+                        score = self.episode_scores_meter_map[
+                            score_key + "_final"
+                        ].get_mean()
+                        self.writer.add_scalar(
+                            "scores/{}/iter".format(score_key), score, self.iter_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/step".format(score_key), score, self.step_count
+                        )
+                        self.writer.add_scalar(
+                            "scores/{}/time".format(score_key), score, time_elapse
+                        )
                 self.writer.add_scalar(
                     "policy_discounted_loss/step",
                     mean_policy_discounted_loss,
@@ -720,11 +853,21 @@ class SHAC:
                     mean_policy_discounted_loss,
                     self.iter_count,
                 )
-                self.writer.add_scalar("best_policy_loss/step", self.best_policy_loss, self.step_count)
-                self.writer.add_scalar("best_policy_loss/iter", self.best_policy_loss, self.iter_count)
-                self.writer.add_scalar("episode_lengths/iter", mean_episode_length, self.iter_count)
-                self.writer.add_scalar("episode_lengths/step", mean_episode_length, self.step_count)
-                self.writer.add_scalar("episode_lengths/time", mean_episode_length, time_elapse)
+                self.writer.add_scalar(
+                    "best_policy_loss/step", self.best_policy_loss, self.step_count
+                )
+                self.writer.add_scalar(
+                    "best_policy_loss/iter", self.best_policy_loss, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/iter", mean_episode_length, self.iter_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/step", mean_episode_length, self.step_count
+                )
+                self.writer.add_scalar(
+                    "episode_lengths/time", mean_episode_length, time_elapse
+                )
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
@@ -738,14 +881,22 @@ class SHAC:
                     mean_policy_loss,
                     mean_policy_discounted_loss,
                     mean_episode_length,
-                    self.steps_num * self.num_envs * self.rank_size / (time_end_epoch - time_start_epoch),
+                    self.steps_num
+                    * self.num_envs
+                    * self.rank_size
+                    / (time_end_epoch - time_start_epoch),
                     self.value_loss,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,
                 )
             )
             if self.save_interval > 0 and (self.iter_count % self.save_interval == 0):
-                self.save(self.name + "policy_iter{}_reward{:.3f}".format(self.iter_count, -mean_policy_loss))
+                self.save(
+                    self.name
+                    + "policy_iter{}_reward{:.3f}".format(
+                        self.iter_count, -mean_policy_loss
+                    )
+                )
 
             if should_exit:
                 break
@@ -758,14 +909,18 @@ class SHAC:
             self.save("final_policy")
             # save reward/length history
             self.episode_loss_his = np.array(self.episode_loss_his)
-            self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
+            self.episode_discounted_loss_his = np.array(
+                self.episode_discounted_loss_his
+            )
             self.episode_length_his = np.array(self.episode_length_his)
             np.save(
                 open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
                 self.episode_loss_his,
             )
             np.save(
-                open(os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"),
+                open(
+                    os.path.join(self.log_dir, "episode_discounted_loss_his.npy"), "wb"
+                ),
                 self.episode_discounted_loss_his,
             )
             np.save(
@@ -793,7 +948,10 @@ class SHAC:
             for param in parameters:
                 if param.grad is not None:
                     param.grad.data.copy_(
-                        all_grads[offset : offset + param.numel()].view_as(param.grad.data) / self.rank_size
+                        all_grads[offset : offset + param.numel()].view_as(
+                            param.grad.data
+                        )
+                        / self.rank_size
                     )
                     offset += param.numel()
 
@@ -845,7 +1003,11 @@ class SHAC:
             self._obs_rms = checkpoint[3]
             self._obs_rms = [x.to(self.device) for x in self._obs_rms]
 
-        self.ret_rms = checkpoint[4].to(self.device) if checkpoint[4] is not None else checkpoint[4]
+        self.ret_rms = (
+            checkpoint[4].to(self.device)
+            if checkpoint[4] is not None
+            else checkpoint[4]
+        )
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(),
             betas=cfg["params"]["config"]["betas"],

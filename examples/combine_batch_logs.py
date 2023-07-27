@@ -5,9 +5,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-'''
+"""
 based on https://stackoverflow.com/questions/43068200/how-to-display-the-average-of-multiple-runs-on-tensorboard
-'''
+"""
 import os
 from collections import defaultdict
 
@@ -18,28 +18,46 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 from tensorboardX import SummaryWriter
 import argparse
 
-tag_mapping = {#'rewards0/frame': 'policy_loss/step', 'rewards0/iter': 'policy_loss/iter', 'rewards0/time': 'policy_loss/time', 
-                'rewards0/frame': 'rewards/step', 'rewards0/iter': 'rewards/iter', 'rewards0/time': 'rewards/time', 
-                # 'rewards/frame': 'policy_loss/step', 'rewards/iter': 'policy_loss/iter', 'rewards/time': 'policy_loss/time', 
-                'rewards/frame': 'rewards/step', 'rewards/step': 'rewards/step', 'rewards/iter': 'rewards/iter', 'rewards/time': 'rewards/time', 
-                'policy_loss/step': 'policy_loss/step', 'policy_loss/iter': 'policy_loss/iter', 'policy_loss/time': 'policy_loss/time', 
-                'actor_loss/iter': 'actor_loss/iter', 'actor_loss/step': 'actor_loss/step', 
-                # 'policy_loss/step': 'rewards/step', 'policy_loss/iter': 'rewards/iter', 'policy_loss/time': 'rewards/time', 
-                'training_loss/step': 'training_loss/step', 'training_loss/iter': 'training_loss/iter', 'training_loss/time': 'training_loss/time',
-                'best_policy_loss/step': 'best_policy_loss/step',
-                'episode_lengths/iter': 'episode_lengths/iter', 'episode_lengths/step': 'episode_lengths/step', 'episode_lengths/frame': 'episode_lengths/step',
-                'value_loss/step': 'value_loss/step', 'value_loss/iter': 'value_loss/iter'}
+tag_mapping = {  #'rewards0/frame': 'policy_loss/step', 'rewards0/iter': 'policy_loss/iter', 'rewards0/time': 'policy_loss/time',
+    "rewards0/frame": "rewards/step",
+    "rewards0/iter": "rewards/iter",
+    "rewards0/time": "rewards/time",
+    # 'rewards/frame': 'policy_loss/step', 'rewards/iter': 'policy_loss/iter', 'rewards/time': 'policy_loss/time',
+    "rewards/frame": "rewards/step",
+    "rewards/step": "rewards/step",
+    "rewards/iter": "rewards/iter",
+    "rewards/time": "rewards/time",
+    "policy_loss/step": "policy_loss/step",
+    "policy_loss/iter": "policy_loss/iter",
+    "policy_loss/time": "policy_loss/time",
+    "actor_loss/iter": "actor_loss/iter",
+    "actor_loss/step": "actor_loss/step",
+    # 'policy_loss/step': 'rewards/step', 'policy_loss/iter': 'rewards/iter', 'policy_loss/time': 'rewards/time',
+    "training_loss/step": "training_loss/step",
+    "training_loss/iter": "training_loss/iter",
+    "training_loss/time": "training_loss/time",
+    "best_policy_loss/step": "best_policy_loss/step",
+    "episode_lengths/iter": "episode_lengths/iter",
+    "episode_lengths/step": "episode_lengths/step",
+    "episode_lengths/frame": "episode_lengths/step",
+    "value_loss/step": "value_loss/step",
+    "value_loss/iter": "value_loss/iter",
+}
+
 
 def tabulate_events(dpath):
-
     summary_iterators = []
     for dname in os.listdir(dpath):
         for subfolder_name in args.subfolder_names:
             if os.path.exists(os.path.join(dpath, dname, subfolder_name)):
-                summary_iterators.append(EventAccumulator(os.path.join(dpath, dname, subfolder_name)).Reload())
+                summary_iterators.append(
+                    EventAccumulator(
+                        os.path.join(dpath, dname, subfolder_name)
+                    ).Reload()
+                )
                 break
-            
-    tags = summary_iterators[0].Tags()['scalars']
+
+    tags = summary_iterators[0].Tags()["scalars"]
 
     # for it in summary_iterators:
     #     assert it.Tags()['scalars'] == tags
@@ -57,14 +75,14 @@ def tabulate_events(dpath):
             for event in summary.Scalars(tag):
                 steps_set.add(event.step)
 
-        is_reward = ('reward' in tag)
-        is_loss = ('loss' in tag)
+        is_reward = "reward" in tag
+        is_loss = "loss" in tag
 
         steps = list(steps_set)
         steps.sort()
 
         # steps = steps[:500]
-        
+
         new_tag_name = tag_mapping[tag]
 
         out_values[new_tag_name] = np.zeros((len(steps), len(summary_iterators)))
@@ -79,15 +97,15 @@ def tabulate_events(dpath):
                 # if events[i].value > 100000. or events[i].value < -100000.:
                 #     import IPython
                 #     IPython.embed()
-                    
+
                 out_values[new_tag_name][step_id, summary_id] = events[i].value
 
     return out_steps, out_values
 
 
-def write_combined_events(dpath, acc_steps, acc_values, dname='combined'):
+def write_combined_events(dpath, acc_steps, acc_values, dname="combined"):
     fpath = os.path.join(dpath, dname)
-    
+
     if os.path.exists(fpath):
         shutil.rmtree(fpath)
 
@@ -102,9 +120,12 @@ def write_combined_events(dpath, acc_steps, acc_values, dname='combined'):
 
     writer.flush()
 
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch-folder', type = str, default='path/to/batch/folder')
-parser.add_argument('--subfolder-names', type = str, nargs = '+', default=['log', 'runs']) # 'runs' for rl
+parser.add_argument("--batch-folder", type=str, default="path/to/batch/folder")
+parser.add_argument(
+    "--subfolder-names", type=str, nargs="+", default=["log", "runs"]
+)  # 'runs' for rl
 
 args = parser.parse_args()
 

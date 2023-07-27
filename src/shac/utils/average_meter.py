@@ -15,7 +15,7 @@ class AverageMeter(nn.Module):
         super(AverageMeter, self).__init__()
         self.max_size = max_size
         self.current_size = 0
-        self.register_buffer("mean", torch.zeros(in_shape, dtype = torch.float32))
+        self.register_buffer("mean", torch.zeros(in_shape, dtype=torch.float32))
 
     def update(self, values):
         size = values.size()[0]

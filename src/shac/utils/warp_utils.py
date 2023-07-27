@@ -96,7 +96,6 @@ def spatial_assign(a, b):
 def compute_joint_q(
     X_wp: wp.transform, X_wc: wp.transform, axis: wp.vec3, rotation_count: float
 ):
-
     # child transform and moment arm
     q_p = wp.transform_get_rotation(X_wp)
     q_c = wp.transform_get_rotation(X_wc)
@@ -140,7 +139,6 @@ def get_joint_q(
     # outputs
     joint_q: wp.array(dtype=float),
 ):
-
     tid = wp.tid()
     type = joint_type[tid]
     axis = joint_axis[tid]
@@ -172,7 +170,6 @@ def get_joint_qd(
     # outputs
     joint_qd: wp.array(dtype=float),
 ):
-
     tid = wp.tid()
     type = joint_type[tid]
     qd_start = joint_qd_start[tid]

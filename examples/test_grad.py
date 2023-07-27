@@ -26,6 +26,7 @@ import numpy as np
 EPS = 0.1
 ATOL = 1e-4
 
+
 def test_gradcheck_zero_ac(args, num_steps):
     seeding()
     env_fn = getattr(envs, args.env)
@@ -35,13 +36,13 @@ def test_gradcheck_zero_ac(args, num_steps):
         render=args.render,
         seed=0,
         no_grad=False,
-        stochastic_init=False  # True
+        stochastic_init=False,  # True
     )
     if issubclass(env_fn, envs.DFlexEnv):
         env_fn_kwargs["MM_caching_frequency"] = 1
 
     env = env_fn(**env_fn_kwargs)
- 
+
     def test_fn(actions, plot=False):
         ob_vec = []
         obs = env.reset()
@@ -53,15 +54,16 @@ def test_gradcheck_zero_ac(args, num_steps):
             assert obs.requires_grad, "obs should require grad"
             ob_vec.append(obs.detach().cpu().numpy().flatten())
             ret = r + ret * 0.999
-        return r  
-    actions = torch.tensor([[0.]], device='cuda', requires_grad=True)
+        return r
+
+    actions = torch.tensor([[0.0]], device="cuda", requires_grad=True)
     assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=ATOL)
+
 
 def test_gradcheck_rand_ac(args, num_steps):
     seeding()
 
     def test_fn(actions, plot=False):
-
         env_fn = getattr(envs, args.env)
 
         env_fn_kwargs = dict(
@@ -70,7 +72,7 @@ def test_gradcheck_rand_ac(args, num_steps):
             render=args.render,
             seed=0,
             no_grad=False,
-            stochastic_init=False  # True
+            stochastic_init=False,  # True
         )
         if issubclass(env_fn, envs.DFlexEnv):
             env_fn_kwargs["MM_caching_frequency"] = 1
@@ -86,8 +88,8 @@ def test_gradcheck_rand_ac(args, num_steps):
             assert obs.requires_grad, "obs should require grad"
             ob_vec.append(obs.detach().cpu().numpy().flatten())
             ret = r + ret * 0.999
-        return r  
- 
+        return r
+
     num_actions = 1
     torch.manual_seed(123)
     actions = torch.rand(
@@ -104,7 +106,7 @@ def test_gradcheck_rand_ac(args, num_steps):
         # if actions.grad:
         #    actions.grad.zero_()
 
-        # check against finite differencing, eps,  atol rtol = 1e-6 
+        # check against finite differencing, eps,  atol rtol = 1e-6
         assert torch.autograd.gradcheck(test_fn, (actions,), eps=EPS, atol=1e-4)
         # num_grad, anal_grad = check_grad(test_fn, actions, eps=EPS, atol=ATOL, rtol=RTOL)
 
@@ -119,7 +121,9 @@ def check_grad(fn, inputs, eps=1e-6, atol=1e-4, rtol=1e-6):
     analytical = inputs.grad.clone()
     x2, x1 = inputs + eps, inputs - eps
     numerical = (fn(x2) - fn(x1)) / (2 * eps)
-    assert torch.allclose(numerical, analytical, rtol, atol), "numerical gradient was: {}, analytical was: {}".format(numerical, analytical)
+    assert torch.allclose(
+        numerical, analytical, rtol, atol
+    ), "numerical gradient was: {}, analytical was: {}".format(numerical, analytical)
     return (numerical, analytical)
 
 
