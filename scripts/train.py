@@ -135,7 +135,7 @@ def train(cfg: DictConfig):
                 traj_optimizer.train()
             else:
                 traj_optimizer.play(cfg_full)
-            wandb.finish()
+
         elif cfg.alg.name == "ppo":
             # if not hydra init, then we must have PPO
             # to set up RL games we have to do a bunch of config menipulation
@@ -182,13 +182,15 @@ def train(cfg: DictConfig):
             runner.load(cfg_train)
             runner.reset()
             runner.run(cfg_train["params"]["general"])
-            wandb.finish()
         else:
             raise NotImplementedError
     except:
         traceback.print_exc(file=open("exception.log", "w"))
         with open("exception.log", "r") as f:
             print(f.read())
+
+    if cfg.general.run_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":
