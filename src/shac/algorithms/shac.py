@@ -197,6 +197,8 @@ class SHAC:
         self.value_loss = np.inf
         self.grad_norm_before_clip = np.inf
         self.grad_norm_after_clip = np.inf
+        self.early_termination = 0
+        self.episode_end = 0
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -306,7 +308,11 @@ class SHAC:
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
+            trunc = self.episode_length == self.max_episode_length
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+
+            self.early_termination += torch.sum(term).item()
+            self.episode_end += torch.sum(trunc).item()
 
             if i < self.steps_num - 1:
                 # first terminate all rollouts which are 'done'
@@ -369,6 +375,8 @@ class SHAC:
                         self.episode_discounted_loss[id] = 0.0
                         self.episode_length[id] = 0
                         self.episode_gamma[id] = 1.0
+
+        self.horizon_length_meter.update(rollout_len)
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -515,7 +523,9 @@ class SHAC:
         self.episode_discounted_loss = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
+        self.episode_length = torch.zeros(
+            self.num_envs, dtype=torch.int, device=self.device
+        )
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
@@ -630,21 +640,12 @@ class SHAC:
 
             # logging
             time_elapse = time.time() - self.start_time
-            self.writer.add_scalar("lr/iter", lr, self.iter_count)
-            self.writer.add_scalar("actor_loss/step", self.actor_loss, self.step_count)
-            self.writer.add_scalar("actor_loss/iter", self.actor_loss, self.iter_count)
-            self.writer.add_scalar("value_loss/step", self.value_loss, self.step_count)
-            self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
-            self.writer.add_scalar(
-                "rollout_len/iter", self.mean_horizon, self.iter_count
-            )
-            self.writer.add_scalar(
-                "rollout_len/step", self.mean_horizon, self.step_count
-            )
-            self.writer.add_scalar("rollout_len/time", self.mean_horizon, time_elapse)
-            self.writer.add_scalar("fps/iter", fps, self.iter_count)
-            self.writer.add_scalar("fps/step", fps, self.step_count)
-            self.writer.add_scalar("fps/time", fps, time_elapse)
+            self.log_scalar("lr", lr, time_elapse)
+            self.log_scalar("actor_loss", self.actor_loss, time_elapse)
+            self.log_scalar("value_loss", self.value_loss, time_elapse)
+            self.log_scalar("rollout_len", self.mean_horizon, time_elapse)
+            self.log_scalar("fps", fps, time_elapse)
+
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
@@ -659,22 +660,9 @@ class SHAC:
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.writer.add_scalar(
-                    "policy_loss/step", mean_policy_loss, self.step_count
-                )
-                self.writer.add_scalar(
-                    "policy_loss/time", mean_policy_loss, time_elapse
-                )
-                self.writer.add_scalar(
-                    "policy_loss/iter", mean_policy_loss, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "rewards/step", -mean_policy_loss, self.step_count
-                )
-                self.writer.add_scalar("rewards/time", -mean_policy_loss, time_elapse)
-                self.writer.add_scalar(
-                    "rewards/iter", -mean_policy_loss, self.iter_count
-                )
+                self.log_scalar("policy_loss", mean_policy_loss, time_elapse)
+                self.log_scalar("rewards", -mean_policy_loss, time_elapse)
+
                 if (
                     self.score_keys
                     and len(
@@ -686,49 +674,21 @@ class SHAC:
                         score = self.episode_scores_meter_map[
                             score_key + "_final"
                         ].get_mean()
-                        self.writer.add_scalar(
-                            "scores/{}/iter".format(score_key), score, self.iter_count
-                        )
-                        self.writer.add_scalar(
-                            "scores/{}/step".format(score_key), score, self.step_count
-                        )
-                        self.writer.add_scalar(
-                            "scores/{}/time".format(score_key), score, time_elapse
-                        )
-                self.writer.add_scalar(
-                    "policy_discounted_loss/step",
-                    mean_policy_discounted_loss,
-                    self.step_count,
+                        self.log_scalar(f"scores/{score_key}", score, time_elapse)
+
+                self.log_scalar(
+                    "policy_discounted_loss", mean_policy_discounted_loss, time_elapse
                 )
-                self.writer.add_scalar(
-                    "policy_discounted_loss/iter",
-                    mean_policy_discounted_loss,
-                    self.iter_count,
-                )
-                self.writer.add_scalar(
-                    "best_policy_loss/step", self.best_policy_loss, self.step_count
-                )
-                self.writer.add_scalar(
-                    "best_policy_loss/iter", self.best_policy_loss, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/iter", mean_episode_length, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/step", mean_episode_length, self.step_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/time", mean_episode_length, time_elapse
-                )
+                self.log_scalar("best_policy_loss", self.best_policy_loss, time_elapse)
+                self.log_scalar("episode_lengths", mean_episode_length, time_elapse)
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
-                self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
-                self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
-                self.writer.add_scalar(
-                    "actor_grad_norm/iter", self.grad_norm_before_clip, self.iter_count
+                self.log_scalar("ac_std", ac_stddev, time_elapse)
+                self.log_scalar(
+                    "actor_grad_norm", self.grad_norm_before_clip, time_elapse
                 )
-                self.writer.add_scalar(
-                    "actor_grad_norm/step", self.grad_norm_before_clip, self.step_count
+                self.log_scalar("episode_end", self.episode_end, time_elapse)
+                self.log_scalar(
+                    "early_termination", self.early_termination, time_elapse
                 )
             else:
                 mean_policy_loss = np.inf
@@ -819,6 +779,12 @@ class SHAC:
             if checkpoint[4] is not None
             else checkpoint[4]
         )
+
+    def log_scalar(self, scalar, value, time):
+        """Helper method for consistent logging"""
+        self.writer.add_scalar(f"{scalar}/iter", value, self.iter_count)
+        self.writer.add_scalar(f"{scalar}/step", value, self.step_count)
+        self.writer.add_scalar(f"{scalar}/time", value, time)
 
     def close(self):
         self.writer.close()
