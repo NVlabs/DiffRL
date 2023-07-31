@@ -113,84 +113,74 @@ cfg_path = os.path.join(cfg_path, "cfg")
 
 @hydra.main(config_path="cfg", config_name="config.yaml", version_base="1.2")
 def train(cfg: DictConfig):
-    try:
-        cfg_full = OmegaConf.to_container(cfg, resolve=True)
-
-        if cfg.general.run_wandb:
-            create_wandb_run(cfg.wandb, cfg_full)
-
-        # patch code to make jobs log in the correct directory when doing multirun
-        logdir = HydraConfig.get()["runtime"]["output_dir"]
-        logdir = os.path.join(logdir, cfg.general.logdir)
-
-        if "_target_" in cfg.alg:
-            # Run with hydra
-            cfg.env.config.no_grad = not cfg.general.train
-
-            traj_optimizer = instantiate(
-                cfg.alg, env_config=cfg.env.config, logdir=logdir
-            )
-
-            if cfg.general.train:
-                traj_optimizer.train()
-            else:
-                traj_optimizer.play(cfg_full)
-
-        elif cfg.alg.name == "ppo":
-            # if not hydra init, then we must have PPO
-            # to set up RL games we have to do a bunch of config menipulation
-            # which makes it a huge mess...
-
-            # PPO doesn't need env grads
-            cfg.env.config.no_grad = True
-
-            # first shuffle around config structure
-            cfg_train = cfg_full["alg"]
-            cfg_train["params"]["general"] = cfg_full["general"]
-            env_name = cfg_train["params"]["config"]["env_name"]
-            cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
-            cfg_train["params"]["general"]["logdir"] = logdir
-
-            # boilerplate to get rl_games working
-            cfg_train["params"]["general"]["play"] = not cfg_train["params"]["general"][
-                "train"
-            ]
-
-            # Now handle different env instantiation
-            if env_name.split("_")[0] == "df":
-                cfg_train["params"]["config"]["env_name"] = "dflex"
-            elif env_name.split("_")[0] == "warp":
-                cfg_train["params"]["config"]["env_name"] = "warp"
-            env_name = cfg_train["params"]["diff_env"]["_target_"]
-            cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
-
-            # save config
-            if cfg_train["params"]["general"]["train"]:
-                os.makedirs(logdir, exist_ok=True)
-                yaml.dump(cfg_train, open(os.path.join(logdir, "cfg.yaml"), "w"))
-
-            # register envs with the correct number of actors for PPO
-            cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
-            register_envs(cfg.env)
-
-            # add observer to score keys
-            if cfg_train["params"]["config"].get("score_keys"):
-                algo_observer = RLGPUEnvAlgoObserver()
-            else:
-                algo_observer = None
-            runner = Runner(algo_observer)
-            runner.load(cfg_train)
-            runner.reset()
-            runner.run(cfg_train["params"]["general"])
-        else:
-            raise NotImplementedError
-    except:
-        traceback.print_exc(file=open("exception.log", "w"))
-        with open("exception.log", "r") as f:
-            print(f.read())
+    cfg_full = OmegaConf.to_container(cfg, resolve=True)
 
     if cfg.general.run_wandb:
-        wandb.finish()
+        create_wandb_run(cfg.wandb, cfg_full)
+
+    # patch code to make jobs log in the correct directory when doing multirun
+    logdir = HydraConfig.get()["runtime"]["output_dir"]
+    logdir = os.path.join(logdir, cfg.general.logdir)
+
+    if "_target_" in cfg.alg:
+        # Run with hydra
+        cfg.env.config.no_grad = not cfg.general.train
+
+        traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
+
+        if cfg.general.train:
+            traj_optimizer.train()
+        else:
+            traj_optimizer.play(cfg.general.checkpoint, cfg.env.player.games_num)
+
+    elif cfg.alg.name == "ppo":
+        # if not hydra init, then we must have PPO
+        # to set up RL games we have to do a bunch of config menipulation
+        # which makes it a huge mess...
+
+        # PPO doesn't need env grads
+        cfg.env.config.no_grad = True
+
+        # first shuffle around config structure
+        cfg_train = cfg_full["alg"]
+        cfg_train["params"]["general"] = cfg_full["general"]
+        env_name = cfg_train["params"]["config"]["env_name"]
+        cfg_train["params"]["diff_env"] = cfg_full["env"]["config"]
+        cfg_train["params"]["general"]["logdir"] = logdir
+
+        # boilerplate to get rl_games working
+        cfg_train["params"]["general"]["play"] = not cfg_train["params"]["general"][
+            "train"
+        ]
+
+        # Now handle different env instantiation
+        if env_name.split("_")[0] == "df":
+            cfg_train["params"]["config"]["env_name"] = "dflex"
+        elif env_name.split("_")[0] == "warp":
+            cfg_train["params"]["config"]["env_name"] = "warp"
+        env_name = cfg_train["params"]["diff_env"]["_target_"]
+        cfg_train["params"]["diff_env"]["name"] = env_name.split(".")[-1]
+
+        # save config
+        if cfg_train["params"]["general"]["train"]:
+            os.makedirs(logdir, exist_ok=True)
+            yaml.dump(cfg_train, open(os.path.join(logdir, "cfg.yaml"), "w"))
+
+        # register envs with the correct number of actors for PPO
+        cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+        register_envs(cfg.env)
+
+        # add observer to score keys
+        if cfg_train["params"]["config"].get("score_keys"):
+            algo_observer = RLGPUEnvAlgoObserver()
+        else:
+            algo_observer = None
+        runner = Runner(algo_observer)
+        runner.load(cfg_train)
+        runner.reset()
+        runner.run(cfg_train["params"]["general"])
+    else:
+        raise NotImplementedError
 
 
 if __name__ == "__main__":

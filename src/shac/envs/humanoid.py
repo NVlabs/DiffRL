@@ -41,6 +41,7 @@ class HumanoidEnv(DFlexEnv):
         jacobian=False,
         contact_ke=2.0e4,
         contact_kd=None,
+        logdir=None,
     ):
         num_obs = 76
         num_act = 21
@@ -107,7 +108,7 @@ class HumanoidEnv(DFlexEnv):
         self.termination_tolerance = 0.1
         self.height_rew_scale = 10.0
 
-        self.setup_visualizer()
+        self.setup_visualizer(logdir)
 
     def init_sim(self):
         self.builder = df.sim.ModelBuilder()
