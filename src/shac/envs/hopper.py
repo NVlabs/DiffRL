@@ -41,6 +41,7 @@ class HopperEnv(DFlexEnv):
         jacobian=False,
         contact_ke=2.0e4,
         contact_kd=None,  #  1.0e3,
+        logdir=None,
     ):
         num_obs = 11
         num_act = 3
@@ -76,7 +77,7 @@ class HopperEnv(DFlexEnv):
         self.action_strength = 200.0
         self.action_penalty = -1e-1
 
-        self.setup_visualizer()
+        self.setup_visualizer(logdir)
 
     def init_sim(self):
         self.builder = df.sim.ModelBuilder()

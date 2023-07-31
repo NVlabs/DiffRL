@@ -74,7 +74,7 @@ class SHAC:
         assert eval_runs > 0
 
         # Create environment
-        self.env = instantiate(env_config)
+        self.env = instantiate(env_config, logdir=logdir)
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
         print("num_obs = ", self.env.num_obs)
@@ -755,9 +755,9 @@ class SHAC:
 
         self.close()
 
-    def play(self, cfg):
-        self.load(cfg["params"]["general"]["checkpoint"])
-        self.run(cfg["params"]["config"]["player"]["games_num"])
+    def play(self, checkpoint_path, num_games=1):
+        self.load(checkpoint_path)
+        self.run(num_games)
 
     def save(self, filename=None):
         if filename is None:

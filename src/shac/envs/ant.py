@@ -41,6 +41,7 @@ class AntEnv(DFlexEnv):
         jacobian=False,
         contact_ke=4.0e4,
         contact_kd=None,  #  1.0e4,
+        logdir=None,
     ):
         num_obs = 37
         num_act = 8
@@ -73,7 +74,7 @@ class AntEnv(DFlexEnv):
         self.action_penalty = 0.0
         self.joint_vel_obs_scaling = 0.1
 
-        self.setup_visualizer()
+        self.setup_visualizer(logdir)
 
     def init_sim(self):
         self.builder = df.sim.ModelBuilder()

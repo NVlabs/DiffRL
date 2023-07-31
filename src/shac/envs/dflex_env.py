@@ -246,9 +246,9 @@ class DFlexEnv:
 
         return self.obs_buf
 
-    def setup_visualizer(self):
+    def setup_visualizer(self, logdir=None):
         if self.visualize:
-            filename = f"outputs/{self.__class__.__name__}_{self.num_envs}.usd"
+            filename = f"{logdir}/{self.__class__.__name__}_{self.num_envs}.usd"
             self.stage = Usd.Stage.CreateNew(filename)
             self.renderer = df.render.UsdRenderer(self.model, self.stage)
             self.renderer.draw_points = True
