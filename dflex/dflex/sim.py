@@ -1182,15 +1182,15 @@ def spatial_transform_inertia(t: df.spatial_transform, I: df.spatial_matrix):
 
 @df.kernel
 def eval_rigid_contacts_art(
-    body_X_s: df.tensor(df.spatial_transform),
-    body_v_s: df.tensor(df.spatial_vector),
+    body_X_s: df.tensor(df.spatial_transform),  # position of colliding body
+    body_v_s: df.tensor(df.spatial_vector),  # orientation of colliding body
     contact_body: df.tensor(int),
     contact_point: df.tensor(df.float3),
     contact_dist: df.tensor(float),
     contact_mat: df.tensor(int),
     materials: df.tensor(float),
-    body_f_s: df.tensor(df.spatial_vector),
-    contact_changed: df.tensor(float),
+    body_f_s: df.tensor(df.spatial_vector),  # output
+    contact_count: df.tensor(float),  # output
 ):
     tid = df.tid()
 
@@ -1224,6 +1224,7 @@ def eval_rigid_contacts_art(
     # check ground contact
     c = df.dot(n, p)  # check if we're inside the ground
 
+    # exit if not in contact
     if c >= 0.0:
         return
 
@@ -1252,7 +1253,7 @@ def eval_rigid_contacts_art(
     t_total = df.cross(p, f_total)
 
     df.atomic_add(body_f_s, c_body, df.spatial_vector(t_total, f_total))
-    df.atomic_add(contact_changed, c_body, 1.0)
+    df.atomic_add(contact_count, c_body, 1.0)
 
 
 @df.func
@@ -2671,6 +2672,8 @@ class SemiImplicitIntegrator:
                     preserve_output=True,
                 )
 
+                prev_body_f_s = state_out.body_f_s.clone()
+
                 if model.ground and model.contact_count > 0:
                     # evaluate contact forces
                     tape.launch(
@@ -2685,10 +2688,14 @@ class SemiImplicitIntegrator:
                             model.contact_material,
                             model.shape_materials,
                         ],
-                        outputs=[state_out.body_f_s, state_out.contact_changed],
+                        outputs=[state_out.body_f_s, state_out.contact_count],
                         adapter=model.adapter,
                         preserve_output=True,
                     )
+
+                    state_out.contact_f = (
+                        state_out.body_f_s.clone() - prev_body_f_s
+                    ).detach()
 
                 # particle shape contact
                 if model.particle_count:

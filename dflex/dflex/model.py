@@ -422,7 +422,13 @@ class Model:
                 device=self.adapter,
                 requires_grad=True,
             )
-            s.contact_changed = torch.zeros(
+            s.contact_f = torch.zeros(
+                (self.link_count, 6),
+                dtype=torch.float32,
+                device=self.adapter,
+                requires_grad=True,
+            )
+            s.contact_count = torch.zeros(
                 self.link_count,
                 dtype=torch.float32,
                 device=self.adapter,
