@@ -165,14 +165,6 @@ class DFlexEnv:
             jac = tu.jacobian2(outputs, inputs, max_out_dim=11)
             self.jacobians.append(jac.cpu().numpy())
 
-        contact_changed = (
-            next_state.contact_changed.clone() != self.state.contact_changed.clone()
-        )
-        num_contact_changed = (
-            next_state.contact_changed.clone() - self.state.contact_changed.clone()
-        )
-        contact_changed = contact_changed.view(self.num_envs, -1).any(dim=1)
-        num_contact_changed = num_contact_changed.view(self.num_envs, -1).sum(dim=1)
         self.state = next_state
         self.sim_time += self.sim_dt
 
@@ -195,8 +187,8 @@ class DFlexEnv:
             extras = {
                 "obs_before_reset": self.obs_buf.clone(),
                 "episode_end": termination,
-                "contacts_changed": contact_changed,
-                "num_contact_changed": num_contact_changed,
+                "contact_count": self.state.contact_count.clone().detach(),
+                "contact_forces": self.state.contact_f.clone().detach(),
             }
 
             if self.jacobian and not play:
