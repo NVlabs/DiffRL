@@ -77,6 +77,7 @@ class HopperEnv(DFlexEnv):
         self.action_strength = 200.0
         self.action_penalty = -1e-1
 
+        # TODO logdir shouldn't need to be passed in here
         self.setup_visualizer(logdir)
 
     def init_sim(self):

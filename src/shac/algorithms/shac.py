@@ -71,7 +71,7 @@ class SHAC:
         assert critic_method in ["one-step", "td-lambda"]
         assert 0 < target_critic_alpha <= 1.0
         assert save_interval > 0
-        assert eval_runs > 0
+        assert eval_runs >= 0
 
         # Create environment
         self.env = instantiate(env_config, logdir=logdir)
@@ -754,10 +754,6 @@ class SHAC:
         self.run(self.eval_runs)
 
         self.close()
-
-    def play(self, checkpoint_path, num_games=1):
-        self.load(checkpoint_path)
-        self.run(num_games)
 
     def save(self, filename=None):
         if filename is None:
