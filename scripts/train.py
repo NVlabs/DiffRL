@@ -128,10 +128,13 @@ def train(cfg: DictConfig):
 
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 
+        if cfg.general.checkpoint:
+            traj_optimizer.load(cfg.general.checkpoint)
+
         if cfg.general.train:
             traj_optimizer.train()
         else:
-            traj_optimizer.play(cfg.general.checkpoint, cfg.env.player.games_num)
+            traj_optimizer.eval(cfg.env.player.games_num)
 
     elif cfg.alg.name == "ppo":
         # if not hydra init, then we must have PPO

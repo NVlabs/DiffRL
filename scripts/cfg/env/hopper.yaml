@@ -24,7 +24,7 @@ shac:
     units: [128, 64, 32]
   critic_mlp:
     units: [64, 64]
-  save_interval: 400
+  save_interval: 100
 
 shac2:
   actor_lr: 2e-3
