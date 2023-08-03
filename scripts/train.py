@@ -185,6 +185,9 @@ def train(cfg: DictConfig):
     else:
         raise NotImplementedError
 
+    if cfg.general.run_wandb:
+        wandb.finish()
+
 
 if __name__ == "__main__":
     train()
