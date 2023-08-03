@@ -42,7 +42,7 @@ class HumanoidEnv(DFlexEnv):
         contact_ke=2.0e4,
         contact_kd=None,
         logdir=None,
-        nan_state_fix=True,
+        nan_state_fix=True,  # humanoid env needs this
         jacobian_norm=None,
     ):
         num_obs = 76
