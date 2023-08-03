@@ -42,6 +42,8 @@ class HumanoidEnv(DFlexEnv):
         contact_ke=2.0e4,
         contact_kd=None,
         logdir=None,
+        nan_state_fix=True,
+        jacobian_norm=None,
     ):
         num_obs = 76
         num_act = 21
@@ -55,6 +57,8 @@ class HumanoidEnv(DFlexEnv):
             seed,
             no_grad,
             render,
+            nan_state_fix,
+            jacobian_norm,
             device,
         )
 

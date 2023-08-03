@@ -37,12 +37,16 @@ class DFlexEnv:
         seed=0,
         no_grad=True,
         render=False,
+        nan_state_fix=False,
+        jacobian_norm=None,
         device="cuda:0",
     ):
         self.seed = seed
 
         self.no_grad = no_grad
         df.config.no_grad = self.no_grad
+        self.nan_state_fix = nan_state_fix
+        self.jacobian_norm = jacobian_norm
 
         self.episode_length = episode_length
 
@@ -121,21 +125,38 @@ class DFlexEnv:
         unscaled_actions = self.unscale_act(actions)
         self.set_act(unscaled_actions)
 
-        # NOTE: Potentially needed for humanoid env
         ##### an ugly fix for simulation nan values #### # reference: https://github.com/pytorch/pytorch/issues/15131
-        # def create_hook():
-        #     def hook(grad):
-        #         torch.nan_to_num(grad, 0.0, 0.0, 0.0, out=grad)
+        if self.nan_state_fix:
 
-        #     return hook
+            def create_hook():
+                def hook(grad):
+                    torch.nan_to_num(grad, 0.0, 0.0, 0.0, out=grad)
 
-        # if self.state.joint_q.requires_grad:
-        #     self.state.joint_q.register_hook(create_hook())
-        # if self.state.joint_qd.requires_grad:
-        #     self.state.joint_qd.register_hook(create_hook())
-        # if actions.requires_grad:
-        #     actions.register_hook(create_hook())
-        #################################################
+                return hook
+
+            if self.state.joint_q.requires_grad:
+                self.state.joint_q.register_hook(create_hook())
+            if self.state.joint_qd.requires_grad:
+                self.state.joint_qd.register_hook(create_hook())
+            if actions.requires_grad:
+                actions.register_hook(create_hook())
+
+        if self.jacobian_norm:
+
+            def create_hook():
+                def hook(grad):
+                    if torch.norm(grad) > self.jacobian_norm:
+                        grad = grad / (torch.norm(grad) + 1e-9) * self.jacobian_norm
+                    return grad
+
+                return hook
+
+            if self.state.joint_q.requires_grad:
+                self.state.joint_q.register_hook(create_hook())
+            if self.state.joint_qd.requires_grad:
+                self.state.joint_qd.register_hook(create_hook())
+            if actions.requires_grad:
+                actions.register_hook(create_hook())
 
         next_state = self.integrator.forward(
             self.model,

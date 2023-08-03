@@ -42,6 +42,8 @@ class AntEnv(DFlexEnv):
         contact_ke=4.0e4,
         contact_kd=None,  #  1.0e4,
         logdir=None,
+        nan_state_fix=False,
+        jacobian_norm=None,
     ):
         num_obs = 37
         num_act = 8
@@ -55,6 +57,8 @@ class AntEnv(DFlexEnv):
             seed,
             no_grad,
             render,
+            nan_state_fix,
+            jacobian_norm,
             device,
         )
 

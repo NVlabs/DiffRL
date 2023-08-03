@@ -42,6 +42,8 @@ class HopperEnv(DFlexEnv):
         contact_ke=2.0e4,
         contact_kd=None,  #  1.0e3,
         logdir=None,
+        nan_state_fix=False,
+        jacobian_norm=None,
     ):
         num_obs = 11
         num_act = 3
@@ -55,6 +57,8 @@ class HopperEnv(DFlexEnv):
             seed,
             no_grad,
             render,
+            nan_state_fix,
+            jacobian_norm,
             device,
         )
 
