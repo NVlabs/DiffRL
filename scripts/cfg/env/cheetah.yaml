@@ -4,10 +4,10 @@ config:
   _target_: shac.envs.CheetahEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: ${resolve_default:1024,${general.num_envs}}
+  num_envs: 1024
   seed: ${general.seed}
   episode_length: 1000
-  no_grad: False
+  no_grad: ??? # decided based on algorithm
   stochastic_init: True
   MM_caching_frequency: 16
   early_termination: True
@@ -15,19 +15,19 @@ config:
 shac:
   actor_lr: 2e-3
   critic_lr: 2e-3
-  max_epochs: 2000
+  max_epochs: 500
   betas: [0.7, 0.95]
   actor_mlp:
     units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
 
 ppo:
-  max_epochs: 500
+  actor_mlp:
+    units: [64, 64]
+  max_epochs: 150
   minibatch_size: 1920
   save_interval: 100
   save_best_after: 50
-  num_actors: 32
+  num_actors: 1024
   steps_num: 240
-
-player:
-  games_num: 12
-  num_actors: 4

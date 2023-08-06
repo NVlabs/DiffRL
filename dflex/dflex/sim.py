@@ -1190,6 +1190,7 @@ def eval_rigid_contacts_art(
     contact_mat: df.tensor(int),
     materials: df.tensor(float),
     body_f_s: df.tensor(df.spatial_vector),
+    contact_changed: df.tensor(float),
 ):
     tid = df.tid()
 
@@ -1251,6 +1252,7 @@ def eval_rigid_contacts_art(
     t_total = df.cross(p, f_total)
 
     df.atomic_add(body_f_s, c_body, df.spatial_vector(t_total, f_total))
+    df.atomic_add(contact_changed, c_body, 1.0)
 
 
 @df.func
@@ -2683,7 +2685,7 @@ class SemiImplicitIntegrator:
                             model.contact_material,
                             model.shape_materials,
                         ],
-                        outputs=[state_out.body_f_s],
+                        outputs=[state_out.body_f_s, state_out.contact_changed],
                         adapter=model.adapter,
                         preserve_output=True,
                     )

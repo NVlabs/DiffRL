@@ -1,24 +1,35 @@
 import hydra
+import warp as wp
+
+# wp.config.mode = "debug"
+# wp.config.print_launches = True
+# wp.config.verify_cuda = True
+
 from tqdm import trange
-import shac.algorithms.mpc
+from shac.algorithms.mpc import Policy, Planner
 import matplotlib.pyplot as plt
 import numpy as np
-from shac.utils import custom_resolvers
+
+from shac.utils import hydra_utils
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 
-@hydra.main(config_path="cfg", config_name="config")
-def main(cfg: DictConfig) -> None:
-    print(OmegaConf.to_yaml(cfg))
+@hydra.main(config_path="cfg", config_name="mpc_config")
+def main(cfg: DictConfig):
     env = instantiate(cfg.env.config)
-    eval_env = instantiate(cfg.env.config, num_envs=1)
-    policy = instantiate(cfg.alg.config.policy, num_actions=env.num_acts)
-    planner = instantiate(cfg.alg.config.planner, env=env, policy=policy)
+    cfg.general.num_envs = 1
+    cfg.general.render = True
+    eval_env = instantiate(cfg.env.config)
+
+    policy: Policy = instantiate(cfg.alg.config.policy, num_actions=env.num_acts, max_steps=env.episode_length)
+    planner: Planner = instantiate(cfg.alg.config.planner, env=env, policy=policy)
     rewards = run_planner(planner, eval_env)
 
     plt.plot(rewards)
+    print(sum(rewards))
     plt.savefig("rewards.png")
+    np.save("rewards.npy", np.asarray(rewards))
 
 
 def run_planner(planner, eval_env):

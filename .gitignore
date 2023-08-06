@@ -4,6 +4,8 @@
 *.swp
 *.swo
 tags
+**.out
+**.log
 
 dflex/dflex/kernels*/
 **logs/
@@ -12,3 +14,7 @@ dflex/dflex/kernels*/
 **.egg-info/
 
 wandb/
+checkpoints/
+multirun/
+
+scripts/sweeps/

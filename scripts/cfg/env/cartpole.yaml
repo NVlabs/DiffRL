@@ -1,4 +1,4 @@
-name: df_cartpole
+name: df_cartpole_swing_up
 env_name: CartPoleSwingUpEnv
 
 config:
@@ -8,7 +8,7 @@ config:
   num_envs: 1024
   seed: ${general.seed}
   episode_length: 240
-  no_grad: ${general.play} # ${resolve_default:general.play,False}
+  no_grad: ??? # decided based on algorithm
   stochastic_init: True
   MM_caching_frequency: 4
   early_termination: False
@@ -19,26 +19,22 @@ shac:
   max_epochs: 500
   save_interval: 100
   steps_num: 32
-  betas:
-    - 0.7
-    - 0.95
+  betas: [0.7, 0.95]
   actor_mlp:
-    units:
-      - 64
-      - 64
+    units: [64, 64]
+  critic_mlp:
+    units: [64, 64]
   target_critic_alpha: 0.2
 
 shac2:
   critic_lr: 1e-3
 
 ppo:
-  max_epochs: 500
+  actor_mlp:
+    units: [64, 64]
+  max_epochs: 100
   minibatch_size: 1920
   save_interval: 100
   save_best_after: 50
-  num_actors: 32
+  num_actors: 1024
   steps_num: 240
-
-player:
-  games_num: 12
-  num_actors: 4

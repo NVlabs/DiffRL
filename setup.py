@@ -22,6 +22,7 @@ setup(
     description="Short horizon actor critic",
     keywords=["robotics", "rl"],
     include_package_data=True,
+    # python_requires=">=3.6.*", # commented out as it breaks things
     install_requires=INSTALL_REQUIRES,
     package_dir={"": "src"},
     packages=find_packages(

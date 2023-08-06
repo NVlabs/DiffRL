@@ -3,24 +3,19 @@ defaults:
   - env: cartpole
   - alg: shac
 
+# mostly used for logging and naming experiments
 exp_name: shac_benchmarks
 
-resume_model: null
-
 general:
-  play: False
-  logdir: logs/${alg.name}/${env.name}/
-  save_interval: False
-  no_time_stamp: False
+  train: True # if False, we're in eval mode
+  logdir: logs
   render: False
   device: cuda:0
   run_wandb: False
   seed: 42
-  train: True
   checkpoint:
-  multi_gpu: False
-  mixed_precision: False
-  num_envs:
+  multi_gpu: False # for PPO
+  mixed_precision: False # for PPO
 
 # env-specific defaults for different algs
 env:
@@ -29,29 +24,7 @@ env:
     games_num: 12
     num_actors: 4
 
-  shac:
-    lambda: 0.95
-    actor_mlp:
-      units:
-        - 64
-        - 64
-    critic_mlp:
-      units:
-        - 64
-        - 64
-    target_critic_alpha: 0.4
-    actor_lr: 1e-3
-    critic_lr: 1e-3
-    max_epochs: 2000
-    save_interval: 400
-    steps_num: 32
-    betas:
-      - 0.7
-      - 0.95
-
-  shac2: ${.shac}
-
 wandb:
   project: shac
+  entity: dmanip-rss
   group: ${exp_name}
-  sweep_name_prefix: ${env.name}_${alg.name}-run
