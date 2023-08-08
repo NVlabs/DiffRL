@@ -37,13 +37,13 @@ class HumanoidEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=1,
         early_termination=True,
-        contact_termination=False,
         jacobian=False,
         contact_ke=2.0e4,
         contact_kd=None,
         logdir=None,
         nan_state_fix=True,  # humanoid env needs this
         jacobian_norm=None,
+        reset_all=False,
     ):
         num_obs = 76
         num_act = 21
@@ -59,14 +59,13 @@ class HumanoidEnv(DFlexEnv):
             render,
             nan_state_fix,
             jacobian_norm,
+            reset_all,
+            stochastic_init,
+            jacobian,
             device,
         )
 
-        self.stochastic_init = stochastic_init
         self.early_termination = early_termination
-        self.contact_termination = contact_termination
-        self.jacobian = jacobian
-        self.jacobians = []
         self.contact_ke = contact_ke
         self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 10.0
 

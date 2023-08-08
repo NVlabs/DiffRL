@@ -37,13 +37,13 @@ class CheetahEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=16,
         early_termination=True,
-        contact_termination=False,
         jacobian=False,
         contact_ke=2.0e4,
         contact_kd=None,  #  1.0e3,
         logdir=None,
         nan_state_fix=False,
         jacobian_norm=None,
+        reset_all=False,
     ):
         num_obs = 17
         num_act = 6
@@ -59,14 +59,13 @@ class CheetahEnv(DFlexEnv):
             render,
             nan_state_fix,
             jacobian_norm,
+            reset_all,
+            stochastic_init,
+            jacobian,
             device,
         )
 
-        self.stochastic_init = stochastic_init
         self.early_termination = early_termination
-        self.contact_termination = contact_termination
-        self.jacobian = jacobian
-        self.jacobians = []
         self.contact_ke = contact_ke
         self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 10.0
 
@@ -76,6 +75,7 @@ class CheetahEnv(DFlexEnv):
         self.action_strength = 200.0
         self.action_penalty = -1e-1
 
+        # TODO logdir shouldn't need to be passed in here
         self.setup_visualizer(logdir)
 
     def init_sim(self):

@@ -37,13 +37,13 @@ class AntEnv(DFlexEnv):
         stochastic_init=False,
         MM_caching_frequency=16,
         early_termination=True,
-        contact_termination=False,
         jacobian=False,
         contact_ke=4.0e4,
         contact_kd=None,  #  1.0e4,
         logdir=None,
         nan_state_fix=False,
         jacobian_norm=None,
+        reset_all=False,
     ):
         num_obs = 37
         num_act = 8
@@ -59,14 +59,13 @@ class AntEnv(DFlexEnv):
             render,
             nan_state_fix,
             jacobian_norm,
+            reset_all,
+            stochastic_init,
+            jacobian,
             device,
         )
 
-        self.stochastic_init = stochastic_init
         self.early_termination = early_termination
-        self.contact_termination = contact_termination
-        self.jacobian = jacobian
-        self.jacobians = []
         self.contact_ke = contact_ke
         self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 4.0
 
