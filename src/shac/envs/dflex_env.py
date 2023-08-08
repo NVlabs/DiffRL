@@ -16,7 +16,6 @@ import torch
 from shac.utils import torch_utils as tu
 
 import dflex as df
-import xml.etree.ElementTree as ET
 
 try:
     from pxr import Usd
@@ -39,6 +38,9 @@ class DFlexEnv:
         render=False,
         nan_state_fix=False,
         jacobian_norm=None,
+        reset_all=False,
+        stochastic_init=False,
+        jacobian=False,
         device="cuda:0",
     ):
         self.seed = seed
@@ -47,6 +49,11 @@ class DFlexEnv:
         df.config.no_grad = self.no_grad
         self.nan_state_fix = nan_state_fix
         self.jacobian_norm = jacobian_norm
+        # if true resets all envs on early termination
+        self.reset_all = reset_all
+        self.stochastic_init = stochastic_init
+        self.jacobian = jacobian
+        self.jacobians = []
 
         self.episode_length = episode_length
 
@@ -227,12 +234,10 @@ class DFlexEnv:
 
         return self.obs_buf, rew, done, extras
 
-    def reset(self, env_ids=None, force_reset=True):
-        if env_ids is None:
-            if force_reset == True:
-                env_ids = torch.arange(
-                    self.num_envs, dtype=torch.long, device=self.device
-                )
+    def reset(self, env_ids=None):
+        if env_ids is None or self.reset_all:
+            # reset all environemnts
+            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
 
         if env_ids is not None:
             # clone the state to avoid gradient error
@@ -344,14 +349,10 @@ class DFlexEnv:
     def get_state(self):
         return self.state.joint_q.clone(), self.state.joint_qd.clone()
 
-    def reset_with_state(
-        self, init_joint_q, init_joint_qd, env_ids=None, force_reset=True
-    ):
-        if env_ids is None:
-            if force_reset == True:
-                env_ids = torch.arange(
-                    self.num_envs, dtype=torch.long, device=self.device
-                )
+    def reset_with_state(self, init_joint_q, init_joint_qd, env_ids=None):
+        if env_ids is None or self.reset_all:
+            # reset all environemnts
+            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
 
         if env_ids is not None:
             # fixed start state
