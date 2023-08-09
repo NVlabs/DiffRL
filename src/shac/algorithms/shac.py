@@ -199,6 +199,7 @@ class SHAC:
         self.grad_norm_after_clip = np.inf
         self.early_termination = 0
         self.episode_end = 0
+        self.eval_runs = eval_runs
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -210,8 +211,6 @@ class SHAC:
             key + "_final": AverageMeter(1, 100).to(self.device)
             for key in self.score_keys
         }
-
-        self.eval_runs = eval_runs
 
         # timer
         self.time_report = TimeReport()
@@ -258,6 +257,8 @@ class SHAC:
             # act in environment
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, done, info = self.env.step(torch.tanh(actions))
+            term = info["termination"]
+            trunc = info["truncation"]
 
             with torch.no_grad():
                 raw_rew = rew.clone()
@@ -296,7 +297,6 @@ class SHAC:
 
             # handle terminated environments which stopped for some bad reason
             # since the reason is bad we set their value to 0
-            term = done & (self.episode_length < self.max_episode_length)
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
             for id in term_env_ids:
                 next_values[i + 1, id] = 0.0
@@ -308,7 +308,7 @@ class SHAC:
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
-            trunc = self.episode_length == self.max_episode_length
+            done = term | trunc
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
 
             self.early_termination += torch.sum(term).item()

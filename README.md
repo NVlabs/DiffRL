@@ -47,6 +47,11 @@ In this paper, we present a GPU-based differentiable simulation and propose a po
   pip install protobuf==3.20.0
   ````
 
+
+### Hack to enable building inside the conda environment
+
+ln -s $CONDA_PREFIX/lib $CONDA_PREFIX/lib64
+
 #### Test Examples
 
 A test example can be found in the `examples` folder.

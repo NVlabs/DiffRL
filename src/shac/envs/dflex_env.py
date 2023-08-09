@@ -214,7 +214,8 @@ class DFlexEnv:
         if self.no_grad == False:
             extras = {
                 "obs_before_reset": self.obs_buf.clone(),
-                "episode_end": termination,
+                "termination": termination,
+                "truncation": truncation,
                 "contact_count": self.state.contact_count.clone().detach(),
                 "contact_forces": self.state.contact_f.clone().detach(),
             }
@@ -226,6 +227,8 @@ class DFlexEnv:
 
         # reset all environments which have been terminated
         done = termination | truncation
+        if torch.any(done) and self.reset_all:
+            done = torch.ones(self.num_envs, device=self.device, dtype=torch.bool)
         env_ids = done.nonzero(as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
             self.reset(env_ids)
@@ -235,7 +238,7 @@ class DFlexEnv:
         return self.obs_buf, rew, done, extras
 
     def reset(self, env_ids=None):
-        if env_ids is None or self.reset_all:
+        if env_ids is None:
             # reset all environemnts
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
 
@@ -257,6 +260,28 @@ class DFlexEnv:
 
             # clear action
             self.state.joint_act.view(self.num_envs, -1)[env_ids, :] = 0.0
+
+            self.progress_buf[env_ids] = 0
+
+            self.obs_buf = self.observation_from_state(self.state)
+
+        return self.obs_buf
+
+    def reset_with_state(self, init_joint_q, init_joint_qd, env_ids=None):
+        if env_ids is None:
+            # reset all environemnts
+            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+
+        if env_ids is not None:
+            # fixed start state
+            self.state.joint_q = self.state.joint_q.clone()
+            self.state.joint_qd = self.state.joint_qd.clone()
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, :] = init_joint_q.view(
+                -1, self.num_joint_q
+            )[env_ids, :].clone()
+            self.state.joint_qd.view(self.num_envs, -1)[
+                env_ids, :
+            ] = init_joint_qd.view(-1, self.num_joint_qd)[env_ids, :].clone()
 
             self.progress_buf[env_ids] = 0
 
@@ -348,25 +373,3 @@ class DFlexEnv:
 
     def get_state(self):
         return self.state.joint_q.clone(), self.state.joint_qd.clone()
-
-    def reset_with_state(self, init_joint_q, init_joint_qd, env_ids=None):
-        if env_ids is None or self.reset_all:
-            # reset all environemnts
-            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
-
-        if env_ids is not None:
-            # fixed start state
-            self.state.joint_q = self.state.joint_q.clone()
-            self.state.joint_qd = self.state.joint_qd.clone()
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, :] = init_joint_q.view(
-                -1, self.num_joint_q
-            )[env_ids, :].clone()
-            self.state.joint_qd.view(self.num_envs, -1)[
-                env_ids, :
-            ] = init_joint_qd.view(-1, self.num_joint_qd)[env_ids, :].clone()
-
-            self.progress_buf[env_ids] = 0
-
-            self.obs_buf = self.observation_from_state(self.state)
-
-        return self.obs_buf
