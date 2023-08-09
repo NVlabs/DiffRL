@@ -192,27 +192,35 @@ class HopperEnv(DFlexEnv):
         joint_qd = torch.zeros((len(env_ids), self.num_joint_qd), device=self.device)
         return joint_q, joint_qd
 
+    def static_init_func_rand(self, env_ids):
+        xy = self.start_pos[0] + 0.1 * (torch.rand(size=(2,), device=self.device) - 0.5)
+        xy = xy.repeat(len(env_ids), 1)
+        th = (torch.rand((len(env_ids), 1), device=self.device) - 0.5) * 0.1
+        joints = self.start_joint_q + 0.1 * (
+            torch.rand(
+                size=(self.num_joint_q - 3,),
+                device=self.device,
+            )
+            - 0.5
+        )
+        joints = joints.repeat(len(env_ids), 1)
+        joint_q = torch.cat((xy, th, joints), dim=-1)
+        joint_qd = torch.zeros((len(env_ids), self.num_joint_qd), device=self.device)
+        return joint_q, joint_qd
+
     def stochastic_init_func(self, env_ids):
         """Method for computing stochastic init state"""
-        xy = (
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2]
-            + 0.05
-            * (torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5)
-            * 2.0
+        xy = self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:2] + 0.1 * (
+            torch.rand(size=(len(env_ids), 2), device=self.device) - 0.5
         )
         z = (torch.rand((len(env_ids), 1), device=self.device) - 0.5) * 0.1
 
-        joints = (
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:]
-            + 0.05
-            * (
-                torch.rand(
-                    size=(len(env_ids), self.num_joint_q - 3),
-                    device=self.device,
-                )
-                - 0.5
+        joints = self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:] + 0.1 * (
+            torch.rand(
+                size=(len(env_ids), self.num_joint_q - 3),
+                device=self.device,
             )
-            * 2.0
+            - 0.5
         )
         joint_q = torch.cat((xy, z, joints), dim=-1)
         joint_qd = 0.1 * (
