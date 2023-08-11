@@ -222,8 +222,6 @@ class DFlexEnv:
 
             if self.jacobian and not play:
                 extras.update({"jacobian": jac.cpu().numpy()})
-                # filename = f"/home/ignat/{self.__class__.__name__}_jacobians.npy"
-                # np.save(filename, self.jacobians)
 
         # reset all environments which have been terminated
         done = termination | truncation
