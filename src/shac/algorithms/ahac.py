@@ -156,6 +156,7 @@ class AHAC:
         self.target_critic = copy.deepcopy(self.critic)
 
         # for logging purposes
+        self.jac_buffer = []
         self.jacs = []
         self.cfs = []
         self.early_terms = []
@@ -334,28 +335,25 @@ class AHAC:
             # uses contact forces since they are always available
             cf_norm = np.linalg.norm(info["contact_forces"].cpu())
             jac_norm = np.linalg.norm(info["jacobian"]) if "jacobian" in info else None
-
-            self.cfs.append(cf_norm)
-            if jac_norm:
-                self.jacs.append(jac_norm)
             norm = jac_norm if jac_norm else cf_norm  # shape NxSxA
-            # jac = info["contact_forces"].cpu().numpy()
-            # jac_norm = np.linalg.norm(jac)  # , axis=(1, 2))
-            # self.jacobians.append(jac_norm)
+            self.jac_buffer.append(norm)
             contact_trunc = norm > self.contact_th
             if self.acc_jacobians:
-                # TODO need to fix to work with new refactoring
-                contact_trunc = np.sum(self.jacobians, axis=0) > self.contact_th
+                contact_trunc = (
+                    np.sum(self.jac_buffer[self.steps_min :], axis=0) > self.contact_th
+                )
             contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
             # ensure that we're not truncating envs before the minimum step size
             contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
 
-            # TODO add back in once I sort out the logging bug
-            # if self.log_jacobians:
-            #     i = self.step_count + int(torch.sum(rollout_len).item())
-            #     self.writer.add_scalar("jacobian/step", jac_norm, i)
-            #     self.writer.add_scalar("jacobian_acc/step", np.sum(self.jacobians), i)
-            #     self.writer.add_scalar("contact_forces/step", cf_norm, i)
+            if self.log_jacobians:
+                self.cfs.append(cf_norm)
+                self.jacs.append
+                i = self.step_count + int(torch.sum(rollout_len).item())
+                if jac_norm:
+                    self.writer.add_scalar("jacobian/step", jac_norm, i)
+                self.writer.add_scalar("jacobian_acc/step", np.sum(self.jac_buffer), i)
+                self.writer.add_scalar("contact_forces/step", cf_norm, i)
 
             real_obs = info["obs_before_reset"]
             # sanity check
@@ -387,6 +385,8 @@ class AHAC:
             # now merge all conditions that kill gradients
             grad_done = done | contact_trunc | horizon_trunc
             grad_done_env_ids = grad_done.nonzero(as_tuple=False).squeeze(-1)
+
+            # NOTE: printing below is only for debugging as it breaks wandb logging
             reason = ""
             if torch.all(term):
                 reason += "early termination "
@@ -397,7 +397,7 @@ class AHAC:
             elif torch.all(contact_trunc):
                 reason += "contact truncation "
             # if reason:
-            #     print("reason: ", reason)
+            #     print(f"trunc at {rollout_len.item()+1} reason: {reason}")
 
             self.early_terms.append(torch.all(term).item())
             self.conatct_truncs.append(torch.all(contact_trunc).item())
@@ -461,7 +461,7 @@ class AHAC:
                 self.episode_gamma *= self.gamma
                 if len(grad_done_env_ids) > 0:
                     self.horizon_length_meter.update(rollout_len[grad_done_env_ids])
-                    self.jacobians = []  # flush jacobians
+                    self.jac_buffer = []  # flush jacobians
                 if len(done_env_ids) > 0:
                     self.episode_loss_meter.update(self.episode_loss[done_env_ids])
                     self.episode_discounted_loss_meter.update(
@@ -504,22 +504,22 @@ class AHAC:
 
         self.step_count += steps
 
-        # if self.step_count - self.last_log_steps > 1000:
-        #     np.savez(
-        #         os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
-        #         contact_forces=self.cfs,
-        #         early_termination=self.early_terms,
-        #         contact_truncation=self.conatct_truncs,
-        #         horizon_truncation=self.horizon_truncs,
-        #         episode_ends=self.episode_ends,
-        #     )
-        #     self.cfs = []
-        #     self.early_terms = []
-        #     self.conatct_truncs = []
-        #     self.horizon_truncs = []
-        #     self.episode_ends = []
-        #     self.episode += 1
-        #     self.last_log_steps = self.step_count
+        if self.log_jacobians and self.step_count - self.last_log_steps > 1000:
+            np.savez(
+                os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
+                contact_forces=self.cfs,
+                early_termination=self.early_terms,
+                contact_truncation=self.conatct_truncs,
+                horizon_truncation=self.horizon_truncs,
+                episode_ends=self.episode_ends,
+            )
+            self.cfs = []
+            self.early_terms = []
+            self.conatct_truncs = []
+            self.horizon_truncs = []
+            self.episode_ends = []
+            self.episode += 1
+            self.last_log_steps = self.step_count
 
         return actor_loss
 
@@ -840,8 +840,8 @@ class AHAC:
                 self.log_scalar(
                     "early_termination", self.early_termination, time_elapse
                 )
-                # self.log_scalar("horizon_trunc", self.horizon_trunc, time_elapse)
-                # self.log_scalar("contact_trunc", self.contact_trunc, time_elapse)
+                self.log_scalar("horizon_trunc", self.horizon_trunc, time_elapse)
+                self.log_scalar("contact_trunc", self.contact_trunc, time_elapse)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
