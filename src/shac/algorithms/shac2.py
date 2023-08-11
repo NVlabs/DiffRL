@@ -78,10 +78,10 @@ class SHAC:
         assert critic_method in ["one-step", "td-lambda"]
         assert 0 < target_critic_alpha <= 1.0
         assert save_interval > 0
-        assert eval_runs > 0
+        assert eval_runs >= 0
 
         # Create environment
-        self.env = instantiate(env_config)
+        self.env = instantiate(env_config, logdir=logdir)
         print("num_envs = ", self.env.num_envs)
         print("num_actions = ", self.env.num_actions)
         print("num_obs = ", self.env.num_obs)
@@ -192,28 +192,6 @@ class SHAC:
         )
         self.ret = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
 
-        # for kl divergence computing
-        self.old_mus = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.old_sigmas = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.mus = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self.sigmas = torch.zeros(
-            (self.steps_num, self.num_envs, self.num_actions),
-            dtype=torch.float32,
-            device=self.device,
-        )
-
         # counting variables
         self.iter_count = 0
         self.step_count = 0
@@ -231,13 +209,16 @@ class SHAC:
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
-        self.horizon_length = torch.zeros(self.num_envs, dtype=int)
+        self.episode_length = torch.zeros(
+            self.num_envs, dtype=torch.int, device=self.device
+        )
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
         self.grad_norm_before_clip = np.inf
         self.grad_norm_after_clip = np.inf
+        self.early_termination = 0
+        self.episode_end = 0
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -254,6 +235,10 @@ class SHAC:
 
         # timer
         self.time_report = TimeReport()
+
+    @property
+    def mean_horizon(self):
+        return self.horizon_length_meter.get_mean()
 
     def compute_values(self, obs):
         """Compute values for the given observations with target critic."""
@@ -309,6 +294,8 @@ class SHAC:
             # act in environment
             actions = self.actor(obs, deterministic=deterministic)
             obs, rew, done, info = self.env.step(torch.tanh(actions))
+            term = info["termination"]
+            trunc = info["truncation"]
 
             with torch.no_grad():
                 self.act_buf[i] = actions.clone()
@@ -348,7 +335,7 @@ class SHAC:
 
             # handle terminated environments which stopped for some bad reason
             # since the reason is bad we set their value to 0
-            term = done & (self.episode_length < self.max_episode_length)
+            # term = done & (self.episode_length < self.max_episode_length)
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
             for id in term_env_ids:
                 next_values[i + 1, id] = 0.0
@@ -362,13 +349,16 @@ class SHAC:
 
             # The magic sauce: truncate on contact
             if self.contact_truncation:
-                trunc = info.get("contact_changed", torch.zeros_like(done))
-                trunc = info.get("num_contact_changed", torch.zeros_like(done)) >= 1
+                # trunc = info.get("contact_changed", torch.zeros_like(done))
+                trunc = info["contact_count"].view(self.num_envs, -1).sum(axis=1) >= 1
                 # ensure that we have rolled out at least for steps_min
                 trunc = trunc & (rollout_len >= self.steps_min)
                 done = trunc | done
 
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
+
+            self.early_termination += torch.sum(term).item()
+            self.episode_end += torch.sum(trunc).item()
 
             if i < self.steps_num - 1:
                 # first terminate all rollouts which are 'done'
@@ -390,8 +380,6 @@ class SHAC:
             # clear up gamma and rew_acc for done envs
             gamma[done_env_ids] = 1.0
             rew_acc[i + 1, done_env_ids] = 0.0
-            rollout_lens.extend(rollout_len[done_env_ids].tolist())
-            rollout_len[done_env_ids] = 0
 
             # collect data for critic training
             with torch.no_grad():
@@ -413,31 +401,28 @@ class SHAC:
                         self.episode_discounted_loss[done_env_ids]
                     )
                     self.episode_length_meter.update(self.episode_length[done_env_ids])
+                    self.horizon_length_meter.update(rollout_len[done_env_ids])
+                    rollout_len[done_env_ids] = 0
                     for k, v in filter(lambda x: x[0] in self.score_keys, info.items()):
                         self.episode_scores_meter_map[k + "_final"].update(
                             v[done_env_ids]
                         )
-                    for done_env_id in done_env_ids:
-                        if (
-                            self.episode_loss[done_env_id] > 1e6
-                            or self.episode_loss[done_env_id] < -1e6
-                        ):
+                    for id in done_env_ids:
+                        if self.episode_loss[id] > 1e6 or self.episode_loss[id] < -1e6:
                             print("ep loss error")
                             raise ValueError
 
-                        self.episode_loss_his.append(
-                            self.episode_loss[done_env_id].item()
-                        )
+                        self.episode_loss_his.append(self.episode_loss[id].item())
                         self.episode_discounted_loss_his.append(
-                            self.episode_discounted_loss[done_env_id].item()
+                            self.episode_discounted_loss[id].item()
                         )
-                        self.episode_length_his.append(
-                            self.episode_length[done_env_id].item()
-                        )
-                        self.episode_loss[done_env_id] = 0.0
-                        self.episode_discounted_loss[done_env_id] = 0.0
-                        self.episode_length[done_env_id] = 0
-                        self.episode_gamma[done_env_id] = 1.0
+                        self.episode_length_his.append(self.episode_length[id].item())
+                        self.episode_loss[id] = 0.0
+                        self.episode_discounted_loss[id] = 0.0
+                        self.episode_length[id] = 0
+                        self.episode_gamma[id] = 1.0
+
+        self.horizon_length_meter.update(rollout_len)
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -447,10 +432,6 @@ class SHAC:
         self.actor_loss = actor_loss.detach().item()
 
         self.step_count += self.steps_num * self.num_envs
-
-        # logging of horizon lengths
-        rollout_lens.extend(rollout_len.tolist())
-        self.mean_horizon = np.mean(rollout_lens)
 
         return actor_loss
 
@@ -598,7 +579,9 @@ class SHAC:
         self.episode_discounted_loss = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.episode_length = torch.zeros(self.num_envs, dtype=int, device=self.device)
+        self.episode_length = torch.zeros(
+            self.num_envs, dtype=torch.int, device=self.device
+        )
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
@@ -722,21 +705,12 @@ class SHAC:
 
             # logging
             time_elapse = time.time() - self.start_time
-            self.writer.add_scalar("lr/iter", lr, self.iter_count)
-            self.writer.add_scalar("actor_loss/step", self.actor_loss, self.step_count)
-            self.writer.add_scalar("actor_loss/iter", self.actor_loss, self.iter_count)
-            self.writer.add_scalar("value_loss/step", self.value_loss, self.step_count)
-            self.writer.add_scalar("value_loss/iter", self.value_loss, self.iter_count)
-            self.writer.add_scalar(
-                "rollout_len/iter", self.mean_horizon, self.iter_count
-            )
-            self.writer.add_scalar(
-                "rollout_len/step", self.mean_horizon, self.step_count
-            )
-            self.writer.add_scalar("rollout_len/time", self.mean_horizon, time_elapse)
-            self.writer.add_scalar("fps/iter", fps, self.iter_count)
-            self.writer.add_scalar("fps/step", fps, self.step_count)
-            self.writer.add_scalar("fps/time", fps, time_elapse)
+            self.log_scalar("lr", lr, time_elapse)
+            self.log_scalar("actor_loss", self.actor_loss, time_elapse)
+            self.log_scalar("value_loss", self.value_loss, time_elapse)
+            self.log_scalar("rollout_len", self.mean_horizon, time_elapse)
+            self.log_scalar("fps", fps, time_elapse)
+
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
                 mean_policy_loss = self.episode_loss_meter.get_mean()
@@ -751,22 +725,9 @@ class SHAC:
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.writer.add_scalar(
-                    "policy_loss/step", mean_policy_loss, self.step_count
-                )
-                self.writer.add_scalar(
-                    "policy_loss/time", mean_policy_loss, time_elapse
-                )
-                self.writer.add_scalar(
-                    "policy_loss/iter", mean_policy_loss, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "rewards/step", -mean_policy_loss, self.step_count
-                )
-                self.writer.add_scalar("rewards/time", -mean_policy_loss, time_elapse)
-                self.writer.add_scalar(
-                    "rewards/iter", -mean_policy_loss, self.iter_count
-                )
+                self.log_scalar("policy_loss", mean_policy_loss, time_elapse)
+                self.log_scalar("rewards", -mean_policy_loss, time_elapse)
+
                 if (
                     self.score_keys
                     and len(
@@ -778,49 +739,21 @@ class SHAC:
                         score = self.episode_scores_meter_map[
                             score_key + "_final"
                         ].get_mean()
-                        self.writer.add_scalar(
-                            "scores/{}/iter".format(score_key), score, self.iter_count
-                        )
-                        self.writer.add_scalar(
-                            "scores/{}/step".format(score_key), score, self.step_count
-                        )
-                        self.writer.add_scalar(
-                            "scores/{}/time".format(score_key), score, time_elapse
-                        )
-                self.writer.add_scalar(
-                    "policy_discounted_loss/step",
-                    mean_policy_discounted_loss,
-                    self.step_count,
+                        self.log_scalar(f"scores/{score_key}", score, time_elapse)
+
+                self.log_scalar(
+                    "policy_discounted_loss", mean_policy_discounted_loss, time_elapse
                 )
-                self.writer.add_scalar(
-                    "policy_discounted_loss/iter",
-                    mean_policy_discounted_loss,
-                    self.iter_count,
-                )
-                self.writer.add_scalar(
-                    "best_policy_loss/step", self.best_policy_loss, self.step_count
-                )
-                self.writer.add_scalar(
-                    "best_policy_loss/iter", self.best_policy_loss, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/iter", mean_episode_length, self.iter_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/step", mean_episode_length, self.step_count
-                )
-                self.writer.add_scalar(
-                    "episode_lengths/time", mean_episode_length, time_elapse
-                )
+                self.log_scalar("best_policy_loss", self.best_policy_loss, time_elapse)
+                self.log_scalar("episode_lengths", mean_episode_length, time_elapse)
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.writer.add_scalar("ac_std/iter", ac_stddev, self.iter_count)
-                self.writer.add_scalar("ac_std/step", ac_stddev, self.step_count)
-                self.writer.add_scalar("ac_std/time", ac_stddev, time_elapse)
-                self.writer.add_scalar(
-                    "actor_grad_norm/iter", self.grad_norm_before_clip, self.iter_count
+                self.log_scalar("ac_std", ac_stddev, time_elapse)
+                self.log_scalar(
+                    "actor_grad_norm", self.grad_norm_before_clip, time_elapse
                 )
-                self.writer.add_scalar(
-                    "actor_grad_norm/step", self.grad_norm_before_clip, self.step_count
+                self.log_scalar("episode_end", self.episode_end, time_elapse)
+                self.log_scalar(
+                    "early_termination", self.early_termination, time_elapse
                 )
             else:
                 mean_policy_loss = np.inf
@@ -869,9 +802,6 @@ class SHAC:
         self.save("final_policy")
 
         # save reward/length history
-        self.episode_loss_his = np.array(self.episode_loss_his)
-        self.episode_discounted_loss_his = np.array(self.episode_discounted_loss_his)
-        self.episode_length_his = np.array(self.episode_length_his)
         np.save(
             open(os.path.join(self.log_dir, "episode_loss_his.npy"), "wb"),
             self.episode_loss_his,
@@ -889,10 +819,6 @@ class SHAC:
         self.run(self.eval_runs)
 
         self.close()
-
-    def play(self, cfg):
-        self.load(cfg["params"]["general"]["checkpoint"])
-        self.run(cfg["params"]["config"]["player"]["games_num"])
 
     def save(self, filename=None):
         if filename is None:
@@ -926,6 +852,12 @@ class SHAC:
             if checkpoint[4] is not None
             else checkpoint[4]
         )
+
+    def log_scalar(self, scalar, value, time):
+        """Helper method for consistent logging"""
+        self.writer.add_scalar(f"{scalar}/iter", value, self.iter_count)
+        self.writer.add_scalar(f"{scalar}/step", value, self.step_count)
+        self.writer.add_scalar(f"{scalar}/time", value, time)
 
     def close(self):
         self.writer.close()
