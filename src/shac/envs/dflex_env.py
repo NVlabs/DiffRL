@@ -202,13 +202,13 @@ class DFlexEnv:
         rew = self.calculate_reward(self.obs_buf, actions)
         self.obs_buf = self.observation_from_state(self.state)
 
-        # Reset environments if exseeded horizon
-        # NOTE: this is truncation
-        truncation = self.progress_buf > self.episode_length - 1
-
         # Reset environments if agent has ended in a bad state based on heuristics
-        # NOTE: this is termination
         termination = self.compute_termination(self.obs_buf, actions)
+
+        # Reset environments if exseeded horizon
+        truncation = self.progress_buf > self.episode_length - 1
+        if torch.any(termination) and self.reset_all:
+            truncation = ~termination
 
         extras = None
         if self.no_grad == False:
@@ -227,8 +227,6 @@ class DFlexEnv:
 
         # reset all environments which have been terminated
         done = termination | truncation
-        if torch.any(done) and self.reset_all:
-            done = torch.ones(self.num_envs, device=self.device, dtype=torch.bool)
         env_ids = done.nonzero(as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
             self.reset(env_ids)
