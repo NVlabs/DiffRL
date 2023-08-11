@@ -38,6 +38,7 @@ class SHAC:
         train: bool,  # if False, we only eval the policy
         logdir: str,
         grad_norm: Optional[float] = None,  # clip actor and ciritc grad norms
+        critic_grad_norm: Optional[float] = None,
         actor_lr: float = 2e-3,
         critic_lr: float = 2e-3,
         betas: Tuple[float, float] = (0.7, 0.95),
@@ -112,6 +113,7 @@ class SHAC:
         self.name = self.__class__.__name__ + "_" + env_name
 
         self.grad_norm = grad_norm
+        self.critic_grad_norm = critic_grad_norm
         self.stochastic_evaluation = stochastic_eval
         self.save_interval = save_interval
 
@@ -614,8 +616,8 @@ class SHAC:
                     for params in self.critic.parameters():
                         params.grad.nan_to_num_(0.0, 0.0, 0.0)
 
-                    if self.grad_norm:
-                        clip_grad_norm_(self.critic.parameters(), self.grad_norm)
+                    if self.critic_grad_norm:
+                        clip_grad_norm_(self.critic.parameters(), self.critic_grad_norm)
 
                     self.critic_optimizer.step()
 
