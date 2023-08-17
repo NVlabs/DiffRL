@@ -56,6 +56,7 @@ class SHAC:
         stochastic_eval: bool = False,  # Whether to use stochastic actor in eval
         score_keys: List[str] = [],
         eval_runs: int = 12,
+        log_jacobians: bool = False,  # expensive and messes up wandb
         device: str = "cuda",
     ):
         # sanity check parameters
@@ -139,6 +140,13 @@ class SHAC:
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
+        self.jacs = []
+        self.cfs = []
+        self.early_terms = []
+        self.horizon_truncs = []
+        self.episode_ends = []
+        self.episode = 0
+
         if train:
             self.save("init_policy")
 
@@ -201,7 +209,9 @@ class SHAC:
         self.grad_norm_after_clip = np.inf
         self.early_termination = 0
         self.episode_end = 0
+        self.log_jacobians = log_jacobians
         self.eval_runs = eval_runs
+        self.last_log_steps = 0
 
         # average meter
         self.episode_loss_meter = AverageMeter(1, 100).to(self.device)
@@ -286,6 +296,18 @@ class SHAC:
             self.episode_length += 1
             rollout_len += 1
 
+            if self.log_jacobians:
+                cf_norm = np.linalg.norm(info["contact_forces"].cpu())
+                jac_norm = (
+                    np.linalg.norm(info["jacobian"]) if "jacobian" in info else None
+                )
+                self.cfs.append(cf_norm)
+                self.jacs.append
+                k = self.step_count + int(torch.sum(rollout_len).item())
+                if jac_norm:
+                    self.writer.add_scalar("jacobian/step", jac_norm, k)
+                self.writer.add_scalar("contact_forces/step", cf_norm, k)
+
             real_obs = info["obs_before_reset"]
             # sanity check
             if (~torch.isfinite(real_obs)).sum() > 0:
@@ -309,6 +331,10 @@ class SHAC:
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
+
+            self.early_terms.append(torch.all(term).item())
+            self.horizon_truncs.append(i == self.steps_num - 1)
+            self.episode_ends.append(torch.all(trunc).item())
 
             done = term | trunc
             done_env_ids = done.nonzero(as_tuple=False).squeeze(-1)
@@ -388,6 +414,21 @@ class SHAC:
         self.actor_loss = actor_loss.detach().item()
 
         self.step_count += self.steps_num * self.num_envs
+
+        if self.log_jacobians and self.step_count - self.last_log_steps > 1000:
+            np.savez(
+                os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
+                contact_forces=self.cfs,
+                early_termination=self.early_terms,
+                horizon_truncation=self.horizon_truncs,
+                episode_ends=self.episode_ends,
+            )
+            self.cfs = []
+            self.early_terms = []
+            self.horizon_truncs = []
+            self.episode_ends = []
+            self.episode += 1
+            self.last_log_steps = self.step_count
 
         return actor_loss
 
@@ -585,7 +626,7 @@ class SHAC:
 
             # train actor
             self.time_report.start_timer("actor training")
-            self.actor_optimizer.step(actor_closure).detach().item()
+            self.actor_optimizer.step(actor_closure)
             self.time_report.end_timer("actor training")
 
             # train critic
