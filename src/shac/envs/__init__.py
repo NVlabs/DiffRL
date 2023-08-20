@@ -18,6 +18,7 @@ try:
     from warp.envs.hand_env import HandObjectTask
     from warp.envs.repose_task import ReposeTask
     from warp.envs.articulate_task import ArticulateTask
+    from warp.envs.hopper import HopperEnv as HopperWarpEnv
 except ImportError:
     print("ERROR: warp envs not found, skipping warp envs")
     pass
