@@ -1,0 +1,8 @@
+object_pos_err:
+  reward_fn_partial: 
+    _partial_: true
+    _target_: warp.envs.utils.rewards.l2_dist_exp
+  args: 
+    - target_pos
+    - object_pos
+  scale: 1.0

@@ -1,0 +1,8 @@
+reach_bonus:
+  reward_fn_partial: 
+    _partial_: true
+    _target_: warp.envs.utils.rewards.reach_bonus
+  args: 
+    - object_pose_err
+    - reach_threshold
+  scale: 250.0

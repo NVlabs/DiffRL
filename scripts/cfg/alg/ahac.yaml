@@ -16,7 +16,7 @@ obs_rms: True
 ret_rms: False
 critic_iterations: 16
 critic_batches: 4
-critic_method: td-lambda # ('td-lambda', 'one-step')
+critic_method: one-step # ('td-lambda', 'one-step')
 lam: 0.95
 gamma: 0.99
 max_epochs: ${resolve_child:2000,${env.shac},max_epochs}

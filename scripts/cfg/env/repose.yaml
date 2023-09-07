@@ -18,9 +18,9 @@ score_keys:
 
 config:
   _target_: warp.envs.ReposeTask
-  num_envs: 256 # ${resolve_default:256,${num_envs}}
+  num_envs: 32
   episode_length: 250
-  render: true # ${render}
+  render: ${general.render}
   reward_params: 
     action_penalty: ${env.rewards.action_penalty}
     object_pos_err: ${env.rewards.object_pos_err}
@@ -32,8 +32,7 @@ config:
   use_autograd: true
   use_graph_capture: true
   # use_graph_capture: ${eval:'("shac" not in "${alg.name}")'}
-  no_grad: true
- 
+  no_grad: false
 
 shac:
   actor_lr: 2e-3
@@ -44,7 +43,7 @@ shac:
     units: [128, 64, 32]
   critic_mlp:
     units: [64, 64]
-  save_interval: 400
+  save_interval: 100
 
 shac2:
   actor_lr: 2e-3
@@ -56,7 +55,6 @@ shac2:
   critic_mlp:
     units: [64, 64]
   save_interval: 400
-
 
 
 ppo:
