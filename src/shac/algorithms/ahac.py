@@ -314,7 +314,7 @@ class AHAC:
             # uses contact forces since they are always available
             cf_norm = np.linalg.norm(info["contact_forces"].cpu())
             jac_norm = np.linalg.norm(info["jacobian"]) if "jacobian" in info else None
-            norm = jac_norm if jac_norm else cf_norm  # shape NxSxA
+            norm = jac_norm if jac_norm else cf_norm  # shape Nx1
             self.jac_buffer.append(norm)
             contact_trunc = norm > self.contact_th
             if self.acc_jacobians:
