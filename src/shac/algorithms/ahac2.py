@@ -62,7 +62,6 @@ class AHAC2:
         critic_iterations: int = 16,
         critic_batches: int = 4,
         critic_method: str = "one-step",
-        target_critic_alpha: float = 0.4,
         save_interval: int = 500,  # how often to save policy
         stochastic_eval: bool = False,  # Whether to use stochastic actor in eval
         score_keys: List[str] = [],
@@ -82,7 +81,6 @@ class AHAC2:
         assert critic_iterations > 0
         assert critic_batches > 0
         assert critic_method in ["one-step", "td-lambda"]
-        assert 0 < target_critic_alpha <= 1.0
         assert save_interval > 0
         assert eval_runs >= 0
 
@@ -113,7 +111,6 @@ class AHAC2:
         self.critic_method = critic_method
         self.critic_iterations = critic_iterations
         self.critic_batch_size = self.num_envs * self.steps_num // critic_batches
-        self.target_critic_alpha = target_critic_alpha
 
         self.obs_rms = None
         if obs_rms:
@@ -151,10 +148,8 @@ class AHAC2:
         )
 
         self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
-        self.target_critic = copy.deepcopy(self.critic)
 
         # for logging purposes
-        self.jac_buffer = []
         self.jacs = []
         self.cfs = []
         self.early_terms = []
@@ -264,7 +259,7 @@ class AHAC2:
             (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
         )
         jac_buffer = torch.zeros(
-            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32
         )
 
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
@@ -323,22 +318,23 @@ class AHAC2:
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
             self.episode_length += 1
+            rollout_len += 1
 
             # contact truncation
             # defaults to jacobian truncation if they are available, otherwise
             # uses contact forces since they are always available
-            cf_norm = torch.norm(info["contact_forces"].cpu(), dim=(1, 2))
+            cfs = info["contact_forces"]
+            acc = info["accelerations"]
+            cfs_normalised = torch.where(acc != 0.0, cfs / acc, torch.zeros_like(cfs))
+            cf_norm = torch.norm(cfs_normalised, dim=(1, 2))
             jac_norm = (
                 torch.norm(info["jacobian"], dim=(1, 2)) if "jacobian" in info else None
             )
-            norm = jac_norm if jac_norm else cf_norm
-            jac_buffer[i] = norm
-            contact_trunc = cf_norm > self.contact_th
+            norm = jac_norm if jac_norm else cf_norm  # shape Nx1
+            contact_trunc = norm > self.contact_th
             if self.acc_jacobians:
-                contact_trunc = (
-                    torch.sum(jac_buffer[self.steps_min :], dim=0) > self.contact_th
-                )
-            contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
+                jac_buffer[i + 1] = jac_buffer[i] + norm
+                contact_trunc = jac_buffer[i + 1] > self.contact_th
             # ensure that we're not truncating envs before the minimum step size
             contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
 
@@ -352,9 +348,7 @@ class AHAC2:
                 if jac_norm:
                     self.jacs.append(jac_norm)
                     self.writer.add_scalar("jacobian/step", jac_norm, i)
-                    self.writer.add_scalar(
-                        "jacobian_acc/step", np.sum(self.jac_buffer), i
-                    )
+                    self.writer.add_scalar("jacobian_acc/step", np.sum(jac_buffer), i)
 
             real_obs = info["obs_before_reset"]
             # sanity check
@@ -418,9 +412,11 @@ class AHAC2:
             gamma = gamma * self.gamma
 
             # clear up gamma and rew_acc for done envs
-            gamma[done_env_ids] = 1.0
-            jac_buffer[:, done_env_ids] = 0.0
-            rew_acc[i + 1, done_env_ids] = 0.0
+            # TODO this below used to be done_env_ids which I now changed to grad_done_env_ids
+            #   unsure if this is correct so need to get back to this later
+            gamma[grad_done_env_ids] = 1.0
+            jac_buffer[i + 1, grad_done_env_ids] = 0.0
+            rew_acc[i + 1, grad_done_env_ids] = 0.0
 
             # collect data for critic training
             with torch.no_grad():
@@ -438,7 +434,7 @@ class AHAC2:
                 self.episode_gamma *= self.gamma
                 if len(grad_done_env_ids) > 0:
                     self.horizon_length_meter.update(rollout_len[grad_done_env_ids])
-                    self.jac_buffer = []  # flush jacobians
+                    rollout_len[grad_done_env_ids] = 0
                 if len(done_env_ids) > 0:
                     self.episode_loss_meter.update(self.episode_loss[done_env_ids])
                     self.episode_discounted_loss_meter.update(
@@ -463,8 +459,6 @@ class AHAC2:
                         self.episode_discounted_loss[id] = 0.0
                         self.episode_length[id] = 0
                         self.episode_gamma[id] = 1.0
-
-            rollout_len += 1
 
         actor_loss /= self.steps_num * self.num_envs
 
@@ -581,7 +575,7 @@ class AHAC2:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
+        predicted_values = self.critic.predict(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -831,15 +825,6 @@ class AHAC2:
                     )
                 )
 
-            # update target critic
-            with torch.no_grad():
-                alpha = self.target_critic_alpha
-                for param, param_targ in zip(
-                    self.critic.parameters(), self.target_critic.parameters()
-                ):
-                    param_targ.data.mul_(alpha)
-                    param_targ.data.add_((1.0 - alpha) * param.data)
-
         self.time_report.end_timer("algorithm")
 
         self.time_report.report()
@@ -869,7 +854,7 @@ class AHAC2:
         if filename is None:
             filename = "best_policy"
         torch.save(
-            [self.actor, self.critic, self.target_critic, self.obs_rms, self.ret_rms],
+            [self.actor, self.critic, self.obs_rms, self.ret_rms],
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
@@ -879,12 +864,11 @@ class AHAC2:
         if actor:
             self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
-        self.target_critic = checkpoint[2].to(self.device)
-        self.obs_rms = checkpoint[3].to(self.device)
+        self.obs_rms = checkpoint[2].to(self.device)
         self.ret_rms = (
-            checkpoint[4].to(self.device)
-            if checkpoint[4] is not None
-            else checkpoint[4]
+            checkpoint[3].to(self.device)
+            if checkpoint[3] is not None
+            else checkpoint[3]
         )
 
     def log_scalar(self, scalar, value, time):
