@@ -70,6 +70,8 @@ class AHAC:
         eval_runs: int = 12,
         log_jacobians: bool = False,  # expensive and messes up wandb
         device: str = "cuda",
+        min_horizon: int = 8,
+        min_horizon_alpha: float = 1.0,
     ):
         # sanity check parameters
         assert steps_max > steps_min > 0
@@ -110,6 +112,8 @@ class AHAC:
         self.gamma = gamma
         self.lam = lam
         self.rew_scale = rew_scale
+        self.min_horizon = torch.tensor(min_horizon, device=self.device, dtype=torch.float32)
+        self.min_horizon_alpha = torch.tensor(min_horizon_alpha, device=self.device, dtype=torch.float32, requires_grad=True)
 
         self.critic_method = critic_method
         self.critic_iterations = critic_iterations
@@ -152,7 +156,7 @@ class AHAC:
             device=self.device,
         )
 
-        self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
+        self.all_params = list(self.actor.parameters()) + [self.min_horizon_alpha] + list(self.critic.parameters())
         self.target_critic = copy.deepcopy(self.critic)
 
         # for logging purposes
@@ -170,7 +174,7 @@ class AHAC:
 
         # initialize optimizers
         self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(),
+            list(self.actor.parameters()) + [self.min_horizon_alpha],
             self.actor_lr,
             betas,
         )
@@ -491,11 +495,14 @@ class AHAC:
             # print("horizon=", rollout_len.item())  # end="\r")
             rollout_len += 1
 
-        # steps = self.num_envs * torch.max(rollout_len).item() # vec env
-        steps = torch.sum(rollout_len).item()  # single env
-        # print("steps=", steps)
+        if self.num_envs == 1:
+            steps = torch.sum(rollout_len).item()  # single env
+        else:
+            steps = self.num_envs * torch.max(rollout_len).item() # vec env
+            print("steps=", steps)
         self.last_steps = steps
         actor_loss /= steps
+        actor_loss += 0.5 * self.min_horizon_alpha * torch.square(rollout_len - self.min_horizon).mean()
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
