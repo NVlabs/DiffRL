@@ -221,6 +221,12 @@ class DFlexEnv:
                 "contact_forces": self.state.contact_f.clone()
                 .detach()
                 .view(self.num_envs, -1, 6),
+                "body_forces": self.state.body_f_s.clone()
+                .detach()
+                .view(self.num_envs, -1, 6),
+                "accelerations": self.state.body_a_s.clone()
+                .detach()
+                .view(self.num_envs, -1, 6),
             }
 
             if self.jacobian and not play:

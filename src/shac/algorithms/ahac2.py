@@ -11,8 +11,7 @@
 # as an asynchronus rollout scheme where the gradients flowing back from
 # each env are truncated independently from the others.
 
-# NOTE: Currently plagued with tech issues that don't let us do this efficiently.
-# Still sorting that out and possible might never happen :(
+# AHAC vectorized version in the for-loop style of SHAC
 
 import sys, os
 
@@ -36,7 +35,7 @@ from shac.utils.time_report import TimeReport
 from shac.utils.average_meter import AverageMeter
 
 
-class AHAC:
+class AHAC2:
     def __init__(
         self,
         env_config: DictConfig,
@@ -63,14 +62,12 @@ class AHAC:
         critic_iterations: int = 16,
         critic_batches: int = 4,
         critic_method: str = "one-step",
-        target_critic_alpha: float = 0.4,
         save_interval: int = 500,  # how often to save policy
         stochastic_eval: bool = False,  # Whether to use stochastic actor in eval
         score_keys: List[str] = [],
         eval_runs: int = 12,
         log_jacobians: bool = False,  # expensive and messes up wandb
         device: str = "cuda",
-        min_horizon_alpha: float = 1.0,
     ):
         # sanity check parameters
         assert steps_num > steps_min > 0
@@ -84,7 +81,6 @@ class AHAC:
         assert critic_iterations > 0
         assert critic_batches > 0
         assert critic_method in ["one-step", "td-lambda"]
-        assert 0 < target_critic_alpha <= 1.0
         assert save_interval > 0
         assert eval_runs >= 0
 
@@ -111,13 +107,10 @@ class AHAC:
         self.gamma = gamma
         self.lam = lam
         self.rew_scale = rew_scale
-        self.min_horizon = torch.tensor(steps_min, device=self.device, dtype=torch.float32)
-        self.min_horizon_alpha = torch.tensor(min_horizon_alpha, device=self.device, dtype=torch.float32, requires_grad=True)
 
         self.critic_method = critic_method
         self.critic_iterations = critic_iterations
-        self.critic_batches = critic_batches
-        self.target_critic_alpha = target_critic_alpha
+        self.critic_batch_size = self.num_envs * self.steps_num // critic_batches
 
         self.obs_rms = None
         if obs_rms:
@@ -154,11 +147,9 @@ class AHAC:
             device=self.device,
         )
 
-        self.all_params = list(self.actor.parameters()) + [self.min_horizon_alpha] + list(self.critic.parameters())
-        self.target_critic = copy.deepcopy(self.critic)
+        self.all_params = list(self.actor.parameters()) + list(self.critic.parameters())
 
         # for logging purposes
-        self.jac_buffer = []
         self.jacs = []
         self.cfs = []
         self.early_terms = []
@@ -172,7 +163,7 @@ class AHAC:
 
         # initialize optimizers
         self.actor_optimizer = torch.optim.Adam(
-            list(self.actor.parameters()) + [self.min_horizon_alpha],
+            self.actor.parameters(),
             self.actor_lr,
             betas,
         )
@@ -219,6 +210,9 @@ class AHAC:
         self.episode_gamma = torch.ones(
             self.num_envs, dtype=torch.float32, device=self.device
         )
+        self.episode_length = torch.zeros(
+            self.num_envs, dtype=torch.int, device=self.device
+        )
         self.best_policy_loss = np.inf
         self.actor_loss = np.inf
         self.value_loss = np.inf
@@ -245,6 +239,10 @@ class AHAC:
             for key in self.score_keys
         }
 
+        # temporary load policy
+        # path = "/home/ignat/git/SHAC/scripts/multirun/2023-08-24/18-43-28/14/logs/best_policy.pt"
+        # self.load(path, actor=False)
+
         # timer
         self.time_report = TimeReport()
 
@@ -253,9 +251,18 @@ class AHAC:
         return self.horizon_length_meter.get_mean()
 
     def compute_actor_loss(self, deterministic=False):
-        rew_acc = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
+        rew_acc = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        gamma = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
+        next_values = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32, device=self.device
+        )
+        jac_buffer = torch.zeros(
+            (self.steps_num + 1, self.num_envs), dtype=torch.float32
+        )
+
         actor_loss = torch.tensor(0.0, dtype=torch.float32, device=self.device)
-        actor_loss_terms = 0  # number of additions to actor_loss
 
         with torch.no_grad():
             if self.obs_rms is not None:
@@ -278,10 +285,10 @@ class AHAC:
             (self.num_envs,), dtype=torch.long, device=self.device
         )
         # Start short horizon rollout
-        while actor_loss_terms < self.num_envs:
+        for i in range(self.steps_num):
             # collect data for critic training
             with torch.no_grad():
-                self.obs_buf[rollout_len] = obs.clone()
+                self.obs_buf[i] = obs.clone()
 
             # act in environment
             actions = self.actor(obs, deterministic=deterministic)
@@ -311,20 +318,23 @@ class AHAC:
                 rew = rew / torch.sqrt(ret_var + 1e-6)
 
             self.episode_length += 1
+            rollout_len += 1
 
             # contact truncation
             # defaults to jacobian truncation if they are available, otherwise
             # uses contact forces since they are always available
-            cf_norm = np.linalg.norm(info["contact_forces"].cpu())
-            jac_norm = np.linalg.norm(info["jacobian"]) if "jacobian" in info else None
+            cfs = info["contact_forces"]
+            acc = info["accelerations"]
+            cfs_normalised = torch.where(acc != 0.0, cfs / acc, torch.zeros_like(cfs))
+            cf_norm = torch.norm(cfs_normalised, dim=(1, 2))
+            jac_norm = (
+                torch.norm(info["jacobian"], dim=(1, 2)) if "jacobian" in info else None
+            )
             norm = jac_norm if jac_norm else cf_norm  # shape Nx1
-            self.jac_buffer.append(norm)
             contact_trunc = norm > self.contact_th
             if self.acc_jacobians:
-                contact_trunc = (
-                    np.sum(self.jac_buffer[self.steps_min :], axis=0) > self.contact_th
-                )
-            contact_trunc = tu.to_torch(contact_trunc, dtype=torch.int64)
+                jac_buffer[i + 1] = jac_buffer[i] + norm
+                contact_trunc = jac_buffer[i + 1] > self.contact_th
             # ensure that we're not truncating envs before the minimum step size
             contact_trunc = contact_trunc & (rollout_len >= self.steps_min)
 
@@ -338,9 +348,7 @@ class AHAC:
                 if jac_norm:
                     self.jacs.append(jac_norm)
                     self.writer.add_scalar("jacobian/step", jac_norm, i)
-                    self.writer.add_scalar(
-                        "jacobian_acc/step", np.sum(self.jac_buffer), i
-                    )
+                    self.writer.add_scalar("jacobian_acc/step", np.sum(jac_buffer), i)
 
             real_obs = info["obs_before_reset"]
             # sanity check
@@ -351,44 +359,28 @@ class AHAC:
             if self.obs_rms is not None:
                 real_obs = obs_rms.normalize(real_obs)
 
-            next_values = self.target_critic(real_obs).squeeze(-1)
+            next_values[i + 1] = self.target_critic(real_obs).squeeze(-1)
 
             # handle terminated environments which stopped for some bad reason
             # since the reason is bad we set their value to 0
             term_env_ids = term.nonzero(as_tuple=False).squeeze(-1)
             for id in term_env_ids:
-                next_values[id] = 0.0
+                next_values[i + 1, id] = 0.0
 
             # sanity check
             if (next_values > 1e6).sum() > 0 or (next_values < -1e6).sum() > 0:
                 print("next value error")
                 raise ValueError
 
-            rew_acc += self.gamma**rollout_len * rew
-
-            # exceeded maximum allowed horizon
-            horizon_trunc = rollout_len >= (self.steps_num - 1)
+            rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
 
             # now merge all conditions that kill gradients
-            grad_done = done | contact_trunc | horizon_trunc
+            grad_done = done | contact_trunc
             grad_done_env_ids = grad_done.nonzero(as_tuple=False).squeeze(-1)
-
-            # NOTE: printing below is only for debugging as it breaks wandb logging
-            # reason = ""
-            # if torch.all(term):
-            #     reason += "early termination "
-            # elif torch.all(trunc):
-            #     reason += "episode end "
-            # elif torch.all(horizon_trunc):
-            #     reason += "horizon truncation "
-            # elif torch.all(contact_trunc):
-            #     reason += "contact truncation "
-            # if reason:
-            #     print(f"trunc at {rollout_len.item()+1} reason: {reason}")
 
             self.early_terms.append(torch.all(term).item())
             self.conatct_truncs.append(torch.all(contact_trunc).item())
-            self.horizon_truncs.append(torch.all(horizon_trunc).item())
+            self.horizon_truncs.append(i == self.steps_num - 1)
             self.episode_ends.append(torch.all(trunc).item())
 
             # done is left for episodes that have finished due to early term or episode end
@@ -398,23 +390,42 @@ class AHAC:
             # log termination/truncation conditions
             self.early_termination += torch.sum(term).item()
             self.contact_trunc += torch.sum(contact_trunc).item()
-            self.horizon_trunc += torch.sum(horizon_trunc).item()
+            self.horizon_trunc += self.num_envs * (i == self.steps_num - 1)
             self.episode_end += torch.sum(trunc).item()
 
-            # terminate all done environments
-            for k in grad_done_env_ids:
-                actor_loss -= (
-                    rew_acc[k] + self.gamma ** rollout_len[k] * next_values[k]
+            # TODO might want to kill early based on how many terms we have
+            if i < self.steps_num - 1:
+                # first terminate all rollouts which are 'done'
+                actor_loss += (
+                    -rew_acc[i + 1, done_env_ids]
+                    - self.gamma
+                    * gamma[done_env_ids]
+                    * next_values[i + 1, done_env_ids]
+                ).sum()
+            else:
+                # terminate all envs because we reached the end of our rollout
+                actor_loss += (
+                    -rew_acc[i + 1, :] - self.gamma * gamma * next_values[i + 1, :]
                 ).sum()
 
-            # keep count of number of loss terms we've added so far
-            actor_loss_terms += grad_done.sum().item()
+            # compute gamma for next step
+            gamma = gamma * self.gamma
+
+            # clear up gamma and rew_acc for done envs
+            # TODO this below used to be done_env_ids which I now changed to grad_done_env_ids
+            #   unsure if this is correct so need to get back to this later
+            gamma[grad_done_env_ids] = 1.0
+            jac_buffer[i + 1, grad_done_env_ids] = 0.0
+            rew_acc[i + 1, grad_done_env_ids] = 0.0
 
             # collect data for critic training
             with torch.no_grad():
-                self.rew_buf[rollout_len] = rew.clone()
-                self.done_mask[rollout_len] = done.clone().to(torch.float32)
-                self.next_values[rollout_len] = next_values.clone()
+                self.rew_buf[i] = rew.clone()
+                if i < self.steps_num - 1:
+                    self.done_mask[i] = done.clone().to(torch.float32)
+                else:
+                    self.done_mask[i, :] = 1.0
+                self.next_values[i] = next_values[i + 1].clone()
 
             # collect episode loss
             with torch.no_grad():
@@ -423,7 +434,7 @@ class AHAC:
                 self.episode_gamma *= self.gamma
                 if len(grad_done_env_ids) > 0:
                     self.horizon_length_meter.update(rollout_len[grad_done_env_ids])
-                    self.jac_buffer = []  # flush jacobians
+                    rollout_len[grad_done_env_ids] = 0
                 if len(done_env_ids) > 0:
                     self.episode_loss_meter.update(self.episode_loss[done_env_ids])
                     self.episode_discounted_loss_meter.update(
@@ -449,16 +460,7 @@ class AHAC:
                         self.episode_length[id] = 0
                         self.episode_gamma[id] = 1.0
 
-            rollout_len += 1
-
-        if self.num_envs == 1:
-            steps = torch.sum(rollout_len).item()  # single env
-        else: 
-            steps = self.num_envs * torch.max(rollout_len).item() # vec env 
-            print("steps=", steps)
-        self.last_steps = steps
         actor_loss /= self.steps_num * self.num_envs
-        actor_loss += 0.5 * self.min_horizon_alpha * torch.square(rollout_len - self.min_horizon).mean()
 
         if self.ret_rms is not None:
             actor_loss = actor_loss * torch.sqrt(ret_var + 1e-6)
@@ -553,7 +555,7 @@ class AHAC:
             Ai = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
             Bi = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
             lam = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
-            for i in reversed(range(self.last_steps)):
+            for i in reversed(range(self.steps_num)):
                 lam = lam * self.lam * (1.0 - self.done_mask[i]) + self.done_mask[i]
                 Ai = (1.0 - self.done_mask[i]) * (
                     self.lam * self.gamma * Ai
@@ -573,7 +575,7 @@ class AHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
+        predicted_values = self.critic.predict(batch_sample["obs"]).squeeze(-1)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -688,23 +690,17 @@ class AHAC:
             self.time_report.start_timer("prepare critic dataset")
             with torch.no_grad():
                 self.compute_target_values()
-                critic_batch_size = 1
-                if self.last_steps >= self.critic_batches:
-                    critic_batch_size = (
-                        self.num_envs * self.last_steps // self.critic_batches
-                    )
-
                 dataset = CriticDataset(
-                    critic_batch_size,
-                    self.obs_buf[: self.last_steps],
-                    self.target_values[: self.last_steps],
+                    self.critic_batch_size,
+                    self.obs_buf,
+                    self.target_values,
                     drop_last=False,
                 )
             self.time_report.end_timer("prepare critic dataset")
 
             self.time_report.start_timer("critic training")
             self.value_loss = 0.0
-            for j in range(min(self.critic_iterations, self.last_steps)):
+            for j in range(self.critic_iterations):
                 total_critic_loss = 0.0
                 batch_cnt = 0
                 for i in range(len(dataset)):
@@ -735,17 +731,11 @@ class AHAC:
 
             self.time_report.end_timer("critic training")
 
-            # reset buffers correctly for next iteration
-            self.rew_buf = torch.zeros_like(self.rew_buf)
-            self.next_values = torch.zeros_like(self.next_values)
-            self.obs_buf = torch.zeros_like(self.obs_buf)
-            self.done_mask = torch.zeros_like(self.done_mask)
-
             self.iter_count += 1
 
             time_end_epoch = time.time()
 
-            fps = self.last_steps * self.num_envs / (time_end_epoch - time_start_epoch)
+            fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
 
             # logging
             time_elapse = time.time() - self.start_time
@@ -835,15 +825,6 @@ class AHAC:
                     )
                 )
 
-            # update target critic
-            with torch.no_grad():
-                alpha = self.target_critic_alpha
-                for param, param_targ in zip(
-                    self.critic.parameters(), self.target_critic.parameters()
-                ):
-                    param_targ.data.mul_(alpha)
-                    param_targ.data.add_((1.0 - alpha) * param.data)
-
         self.time_report.end_timer("algorithm")
 
         self.time_report.report()
@@ -873,21 +854,21 @@ class AHAC:
         if filename is None:
             filename = "best_policy"
         torch.save(
-            [self.actor, self.critic, self.target_critic, self.obs_rms, self.ret_rms],
+            [self.actor, self.critic, self.obs_rms, self.ret_rms],
             os.path.join(self.log_dir, "{}.pt".format(filename)),
         )
 
-    def load(self, path):
+    def load(self, path, actor=True):
         print("Loading policy from", path)
         checkpoint = torch.load(path)
-        self.actor = checkpoint[0].to(self.device)
+        if actor:
+            self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
-        self.target_critic = checkpoint[2].to(self.device)
-        self.obs_rms = checkpoint[3].to(self.device)
+        self.obs_rms = checkpoint[2].to(self.device)
         self.ret_rms = (
-            checkpoint[4].to(self.device)
-            if checkpoint[4] is not None
-            else checkpoint[4]
+            checkpoint[3].to(self.device)
+            if checkpoint[3] is not None
+            else checkpoint[3]
         )
 
     def log_scalar(self, scalar, value, time):
