@@ -5,7 +5,7 @@ config:
   _target_: shac.envs.HumanoidEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 64
+  num_envs: 512
   no_grad: ??? # decided based on algorithm
   stochastic_init: True
   seed: ${general.seed}
