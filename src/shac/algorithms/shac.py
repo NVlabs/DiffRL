@@ -68,7 +68,7 @@ class SHAC:
         assert 0 < gamma <= 1
         assert 0 < lam <= 1
         assert rew_scale > 0.0
-        assert critic_iterations is None or critic_iterations > 0
+        assert critic_iterations > 0
         assert critic_batches > 0
         assert critic_method in ["one-step", "td-lambda"]
         assert 0 < target_critic_alpha <= 1.0
@@ -694,12 +694,11 @@ class SHAC:
             fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
 
             # logging
-            time_elapse = time.time() - self.start_time
-            self.log_scalar("lr", lr, time_elapse)
-            self.log_scalar("actor_loss", self.actor_loss, time_elapse)
-            self.log_scalar("value_loss", self.value_loss, time_elapse)
-            self.log_scalar("rollout_len", self.mean_horizon, time_elapse)
-            self.log_scalar("fps", fps, time_elapse)
+            self.log_scalar("lr", lr)
+            self.log_scalar("actor_loss", self.actor_loss)
+            self.log_scalar("value_loss", self.value_loss)
+            self.log_scalar("rollout_len", self.mean_horizon)
+            self.log_scalar("fps", fps)
 
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
@@ -715,8 +714,8 @@ class SHAC:
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.log_scalar("policy_loss", mean_policy_loss, time_elapse)
-                self.log_scalar("rewards", -mean_policy_loss, time_elapse)
+                self.log_scalar("policy_loss", mean_policy_loss)
+                self.log_scalar("rewards", -mean_policy_loss)
 
                 if (
                     self.score_keys
@@ -729,22 +728,16 @@ class SHAC:
                         score = self.episode_scores_meter_map[
                             score_key + "_final"
                         ].get_mean()
-                        self.log_scalar(f"scores/{score_key}", score, time_elapse)
+                        self.log_scalar(f"scores/{score_key}", score)
 
-                self.log_scalar(
-                    "policy_discounted_loss", mean_policy_discounted_loss, time_elapse
-                )
-                self.log_scalar("best_policy_loss", self.best_policy_loss, time_elapse)
-                self.log_scalar("episode_lengths", mean_episode_length, time_elapse)
+                self.log_scalar("policy_discounted_loss", mean_policy_discounted_loss)
+                self.log_scalar("best_policy_loss", self.best_policy_loss)
+                self.log_scalar("episode_lengths", mean_episode_length)
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.log_scalar("ac_std", ac_stddev, time_elapse)
-                self.log_scalar(
-                    "actor_grad_norm", self.grad_norm_before_clip, time_elapse
-                )
-                self.log_scalar("episode_end", self.episode_end, time_elapse)
-                self.log_scalar(
-                    "early_termination", self.early_termination, time_elapse
-                )
+                self.log_scalar("ac_std", ac_stddev)
+                self.log_scalar("actor_grad_norm", self.grad_norm_before_clip)
+                self.log_scalar("episode_end", self.episode_end)
+                self.log_scalar("early_termination", self.early_termination)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
