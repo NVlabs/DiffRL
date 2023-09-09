@@ -26,6 +26,7 @@ from tensorboardX import SummaryWriter
 from omegaconf import DictConfig
 from hydra.utils import instantiate
 from typing import Optional, List, Tuple
+from collections import deque
 
 from shac.utils.common import *
 import shac.utils.torch_utils as tu
@@ -59,7 +60,7 @@ class AHAC2:
         rew_scale: float = 1.0,
         obs_rms: bool = False,
         ret_rms: bool = False,
-        critic_iterations: int = 16,
+        critic_iterations: Optional[int] = None,  # if None, we do early stop
         critic_batches: int = 4,
         critic_method: str = "one-step",
         save_interval: int = 500,  # how often to save policy
@@ -72,13 +73,13 @@ class AHAC2:
         # sanity check parameters
         assert steps_num > steps_min > 0
         assert max_epochs > 0
-        assert actor_lr > 0
+        assert actor_lr >= 0
         assert critic_lr >= 0
         assert lr_schedule in ["linear", "constant"]
         assert 0 < gamma <= 1
         assert 0 < lam <= 1
         assert rew_scale > 0.0
-        assert critic_iterations > 0
+        assert critic_iterations is None or critic_iterations > 0
         assert critic_batches > 0
         assert critic_method in ["one-step", "td-lambda"]
         assert save_interval > 0
@@ -343,23 +344,24 @@ class AHAC2:
             if self.log_jacobians:
                 i = self.step_count + int(torch.sum(rollout_len).item())
                 self.cfs.append(cf_norm)
-                self.writer.add_scalar("contact_forces/step", cf_norm, i)
+                self.writer.add_scalar("contact_forces", cf_norm, i)
 
                 if jac_norm:
                     self.jacs.append(jac_norm)
-                    self.writer.add_scalar("jacobian/step", jac_norm, i)
-                    self.writer.add_scalar("jacobian_acc/step", np.sum(jac_buffer), i)
+                    self.writer.add_scalar("jacobian", jac_norm, i)
+                    self.writer.add_scalar("jacobian_acc", np.sum(jac_buffer), i)
 
             real_obs = info["obs_before_reset"]
+
             # sanity check
             if (~torch.isfinite(real_obs)).sum() > 0:
                 print("Got inf obs")
-                raise ValueError
+                # raise ValueError # it's ok to have this for humanoid
 
             if self.obs_rms is not None:
                 real_obs = obs_rms.normalize(real_obs)
 
-            next_values[i + 1] = self.target_critic(real_obs).squeeze(-1)
+            next_values[i + 1] = self.critic(real_obs).squeeze(-1)
 
             # handle terminated environments which stopped for some bad reason
             # since the reason is bad we set their value to 0
@@ -469,10 +471,13 @@ class AHAC2:
 
         self.step_count += self.steps_num * self.num_envs
 
-        if self.log_jacobians and self.step_count - self.last_log_steps > 1000:
+        if (
+            self.log_jacobians
+            and self.step_count - self.last_log_steps > 1000 * self.num_envs
+        ):
             np.savez(
                 os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
-                contact_forces=self.cfs,
+                contact_forces=torch.cat(self.cfs).numpy(),
                 early_termination=self.early_terms,
                 contact_truncation=self.conatct_truncs,
                 horizon_truncation=self.horizon_truncs,
@@ -513,7 +518,7 @@ class AHAC2:
 
             actions = self.actor(obs, deterministic=deterministic)
 
-            obs, rew, done, _ = self.env.step(torch.tanh(actions), play=True)
+            obs, rew, done, _ = self.env.step(torch.tanh(actions))
 
             episode_length += 1
 
@@ -524,12 +529,12 @@ class AHAC2:
             episode_gamma *= self.gamma
             if len(done_env_ids) > 0:
                 for done_env_id in done_env_ids:
-                    # print(
-                    #     "loss = {:.2f}, len = {}".format(
-                    #         episode_loss[done_env_id].item(),
-                    #         episode_length[done_env_id],
-                    #     )
-                    # )
+                    print(
+                        "loss = {:.2f}, len = {}".format(
+                            episode_loss[done_env_id].item(),
+                            episode_length[done_env_id],
+                        )
+                    )
                     episode_loss_his.append(episode_loss[done_env_id].item())
                     episode_discounted_loss_his.append(
                         episode_discounted_loss[done_env_id].item()
@@ -575,7 +580,7 @@ class AHAC2:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        predicted_values = self.critic.predict(batch_sample["obs"]).squeeze(-1)
+        predicted_values = self.critic.predict(batch_sample["obs"]).squeeze(-2)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -700,7 +705,9 @@ class AHAC2:
 
             self.time_report.start_timer("critic training")
             self.value_loss = 0.0
-            for j in range(self.critic_iterations):
+            last_losses = deque(maxlen=5)
+            iterations = self.critic_iterations if self.critic_iterations else 64
+            for j in range(iterations):
                 total_critic_loss = 0.0
                 batch_cnt = 0
                 for i in range(len(dataset)):
@@ -721,10 +728,18 @@ class AHAC2:
                     total_critic_loss += training_critic_loss
                     batch_cnt += 1
 
-                self.value_loss = (total_critic_loss / batch_cnt).detach().cpu().item()
+                total_critic_loss /= batch_cnt
+                if self.critic_iterations is None and len(last_losses) == 5:
+                    diff = abs(np.diff(last_losses).mean())
+                    if diff < 2e-1:
+                        iterations = j + 1
+                        break
+                last_losses.append(total_critic_loss.item())
+
+                self.value_loss = total_critic_loss
                 print(
                     "value iter {}/{}, loss = {:7.6f}".format(
-                        j + 1, self.critic_iterations, self.value_loss
+                        j + 1, iterations, self.value_loss
                     ),
                     end="\r",
                 )
@@ -738,12 +753,12 @@ class AHAC2:
             fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
 
             # logging
-            time_elapse = time.time() - self.start_time
-            self.log_scalar("lr", lr, time_elapse)
-            self.log_scalar("actor_loss", self.actor_loss, time_elapse)
-            self.log_scalar("value_loss", self.value_loss, time_elapse)
-            self.log_scalar("rollout_len", self.mean_horizon, time_elapse)
-            self.log_scalar("fps", fps, time_elapse)
+            self.log_scalar("lr", lr)
+            self.log_scalar("actor_loss", self.actor_loss)
+            self.log_scalar("value_loss", self.value_loss)
+            self.log_scalar("rollout_len", self.mean_horizon)
+            self.log_scalar("fps", fps)
+            self.log_scalar("critic_iterations", iterations)
 
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
@@ -759,8 +774,8 @@ class AHAC2:
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.log_scalar("policy_loss", mean_policy_loss, time_elapse)
-                self.log_scalar("rewards", -mean_policy_loss, time_elapse)
+                self.log_scalar("policy_loss", mean_policy_loss)
+                self.log_scalar("rewards", -mean_policy_loss)
 
                 if (
                     self.score_keys
@@ -773,24 +788,18 @@ class AHAC2:
                         score = self.episode_scores_meter_map[
                             score_key + "_final"
                         ].get_mean()
-                        self.log_scalar(f"scores/{score_key}", score, time_elapse)
+                        self.log_scalar(f"scores/{score_key}", score)
 
-                self.log_scalar(
-                    "policy_discounted_loss", mean_policy_discounted_loss, time_elapse
-                )
-                self.log_scalar("best_policy_loss", self.best_policy_loss, time_elapse)
-                self.log_scalar("episode_lengths", mean_episode_length, time_elapse)
+                self.log_scalar("policy_discounted_loss", mean_policy_discounted_loss)
+                self.log_scalar("best_policy_loss", self.best_policy_loss)
+                self.log_scalar("episode_lengths", mean_episode_length)
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.log_scalar("ac_std", ac_stddev, time_elapse)
-                self.log_scalar(
-                    "actor_grad_norm", self.grad_norm_before_clip, time_elapse
-                )
-                self.log_scalar("episode_end", self.episode_end, time_elapse)
-                self.log_scalar(
-                    "early_termination", self.early_termination, time_elapse
-                )
-                self.log_scalar("horizon_trunc", self.horizon_trunc, time_elapse)
-                self.log_scalar("contact_trunc", self.contact_trunc, time_elapse)
+                self.log_scalar("ac_std", ac_stddev)
+                self.log_scalar("actor_grad_norm", self.grad_norm_before_clip)
+                self.log_scalar("episode_end", self.episode_end)
+                self.log_scalar("early_termination", self.early_termination)
+                self.log_scalar("horizon_trunc", self.horizon_trunc)
+                self.log_scalar("contact_trunc", self.contact_trunc)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
@@ -871,11 +880,9 @@ class AHAC2:
             else checkpoint[3]
         )
 
-    def log_scalar(self, scalar, value, time):
+    def log_scalar(self, scalar, value):
         """Helper method for consistent logging"""
-        self.writer.add_scalar(f"{scalar}/iter", value, self.iter_count)
-        # self.writer.add_scalar(f"{scalar}/step", value, self.step_count)
-        # self.writer.add_scalar(f"{scalar}/time", value, time)
+        self.writer.add_scalar(f"{scalar}", value, self.iter_count)
 
     def close(self):
         self.writer.close()
