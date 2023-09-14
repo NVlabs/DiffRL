@@ -14,7 +14,6 @@ from .humanoid import HumanoidEnv
 from .snu_humanoid import SNUHumanoidEnv
 
 try:
-    from warp.envs.utils import hydra_resolvers
     from warp.envs.obj_env import ObjectTask
     from warp.envs.hopper import HopperEnv as HopperWarpEnv
     from warp.envs.hand_env import HandObjectTask
