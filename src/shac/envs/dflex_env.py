@@ -242,7 +242,7 @@ class DFlexEnv:
 
         return self.obs_buf, rew, done, extras
 
-    def reset(self, env_ids=None):
+    def reset(self, env_ids=None, force_reset=None):
         if env_ids is None:
             # reset all environemnts
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)

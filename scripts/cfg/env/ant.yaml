@@ -23,10 +23,10 @@ shac:
     units: [64, 64]
 
 ppo:
-  max_epochs: 5000
+  max_epochs: 50000
   minibatch_size: 16384
   num_actors: 2048
-  steps_num: 32
+  horizon_length: 32
   actor_mlp:
     units: [128, 64, 32]
   critic_mlp:
