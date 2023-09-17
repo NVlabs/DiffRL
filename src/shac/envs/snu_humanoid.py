@@ -21,11 +21,6 @@ import numpy as np
 
 np.set_printoptions(precision=5, linewidth=256, suppress=True)
 
-try:
-    from pxr import Usd, UsdGeom, Gf
-except ModuleNotFoundError:
-    print("No pxr package")
-
 from shac.utils import load_utils as lu
 from shac.utils import torch_utils as tu
 
@@ -41,6 +36,14 @@ class SNUHumanoidEnv(DFlexEnv):
         no_grad=True,
         stochastic_init=False,
         MM_caching_frequency=1,
+        early_termination=True,
+        jacobian=False,
+        contact_ke=2.0e4,
+        contact_kd=None,
+        logdir=None,
+        nan_state_fix=True,  # humanoid env needs this
+        jacobian_norm=None,
+        reset_all=False,
     ):
         self.filter = {
             "Pelvis",
@@ -90,10 +93,17 @@ class SNUHumanoidEnv(DFlexEnv):
             seed,
             no_grad,
             render,
+            nan_state_fix,
+            jacobian_norm,
+            reset_all,
+            stochastic_init,
+            jacobian,
             device,
         )
 
-        self.stochastic_init = stochastic_init
+        self.early_termination = early_termination
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd if contact_kd is not None else contact_ke / 10.0
 
         self.init_sim()
 
@@ -104,30 +114,16 @@ class SNUHumanoidEnv(DFlexEnv):
         self.action_strength = 100.0
         self.action_penalty = -0.001
         self.joint_vel_obs_scaling = 0.1
+        # self.motor_scale = 0.5
+        # self.motor_strengths = 0.5
 
-        # -----------------------
-        # set up Usd renderer
-        if self.visualize:
-            self.stage = Usd.Stage.CreateNew(
-                "outputs/"
-                + self.name
-                + "HumanoidSNU_Low_"
-                + str(self.num_envs)
-                + ".usd"
-            )
-
-            self.renderer = df.render.UsdRenderer(self.model, self.stage)
-            self.renderer.draw_points = True
-            self.renderer.draw_springs = True
-            self.renderer.draw_shapes = True
-            self.render_time = 0.0
+        self.setup_visualizer(logdir)
 
     def init_sim(self):
         self.builder = df.sim.ModelBuilder()
 
         self.dt = 1.0 / 60.0
         self.sim_substeps = 48
-
         self.sim_dt = self.dt
 
         self.ground = True
@@ -268,244 +264,95 @@ class SNUHumanoidEnv(DFlexEnv):
         if self.model.ground:
             self.model.collide(self.state)
 
-    def render(self, mode="human"):
-        if self.visualize:
-            with torch.no_grad():
-                muscle_start = 0
-                skel_index = 0
+    def unscale_act(self, action):
+        return action * self.motor_scale * self.motor_strengths
 
-                for s in self.skeletons:
-                    for mesh, link in s.mesh_map.items():
-                        if link != -1:
-                            X_sc = df.transform_expand(
-                                self.state.body_X_sc[link].tolist()
-                            )
-
-                            mesh_path = os.path.join(
-                                self.asset_folder, "OBJ/" + mesh + ".usd"
-                            )
-
-                            self.renderer.add_mesh(
-                                mesh, mesh_path, X_sc, 1.0, self.render_time
-                            )
-
-                    for m in range(len(s.muscles)):
-                        start = self.model.muscle_start[muscle_start + m].item()
-                        end = self.model.muscle_start[muscle_start + m + 1].item()
-
-                        points = []
-
-                        for w in range(start, end):
-                            link = self.model.muscle_links[w].item()
-                            point = self.model.muscle_points[w].cpu().numpy()
-
-                            X_sc = df.transform_expand(
-                                self.state.body_X_sc[link].cpu().tolist()
-                            )
-
-                            points.append(
-                                Gf.Vec3f(df.transform_point(X_sc, point).tolist())
-                            )
-
-                        self.renderer.add_line_strip(
-                            points,
-                            name=s.muscles[m].name + str(skel_index),
-                            radius=0.0075,
-                            color=(
-                                self.model.muscle_activation[muscle_start + m]
-                                / self.muscle_strengths[m],
-                                0.2,
-                                0.5,
-                            ),
-                            time=self.render_time,
-                        )
-
-                    muscle_start += len(s.muscles)
-                    skel_index += 1
-
-            self.render_time += self.dt * self.inv_control_freq
-            self.renderer.update(self.state, self.render_time)
-
-            if self.num_frames == 1:
-                try:
-                    self.stage.Save()
-                except:
-                    print("USD save error")
-
-                self.num_frames -= 1
-
-    def step(self, actions):
-        actions = actions.view((self.num_envs, self.num_actions))
-
-        actions = torch.clip(actions, -1.0, 1.0)
-        actions = actions * 0.5 + 0.5
-
-        ##### an ugly fix for simulation nan values #### # reference: https://github.com/pytorch/pytorch/issues/15131
-        def create_hook():
-            def hook(grad):
-                torch.nan_to_num(grad, 0.0, 0.0, 0.0, out=grad)
-
-            return hook
-
-        if self.state.joint_q.requires_grad:
-            self.state.joint_q.register_hook(create_hook())
-        if self.state.joint_qd.requires_grad:
-            self.state.joint_qd.register_hook(create_hook())
-        if actions.requires_grad:
-            actions.register_hook(create_hook())
-        #################################################
-
-        self.actions = actions.clone()
-
-        for ci in range(self.inv_control_freq):
-            if self.mtu_actuations:
-                self.model.muscle_activation = actions.view(-1) * self.muscle_strengths
-            else:
-                self.state.joint_act.view(self.num_envs, -1)[:, 6:] = (
-                    actions * self.action_strength
-                )
-
-            self.state = self.integrator.forward(
-                self.model,
-                self.state,
-                self.sim_dt,
-                self.sim_substeps,
-                self.MM_caching_frequency,
-            )
-            self.sim_time += self.sim_dt
-
-        self.reset_buf = torch.zeros_like(self.reset_buf)
-
-        self.progress_buf += 1
-        self.num_frames += 1
-
-        self.calculateObservations()
-        self.calculateReward()
-
-        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-
-        if self.no_grad == False:
-            self.obs_buf_before_reset = self.obs_buf.clone()
-            self.extras = {
-                "obs_before_reset": self.obs_buf_before_reset,
-                "episode_end": self.termination_buf,
-            }
-
-        if len(env_ids) > 0:
-            self.reset(env_ids)
-
-        with df.ScopedTimer("render", False):
-            self.render()
-
-        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
-
-    def reset(self, env_ids=None, force_reset=True):
-        if env_ids is None:
-            if force_reset == True:
-                env_ids = torch.arange(
-                    self.num_envs, dtype=torch.long, device=self.device
-                )
-
-        if env_ids is not None:
-            # clone the state to avoid gradient error
-            self.state.joint_q = self.state.joint_q.clone()
-            self.state.joint_qd = self.state.joint_qd.clone()
-
-            # fixed start state
-            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = self.start_pos[
-                env_ids, :
-            ].clone()
-            self.state.joint_q.view(self.num_envs, -1)[
-                env_ids, 3:7
-            ] = self.start_rotation.clone()
-            self.state.joint_q.view(self.num_envs, -1)[
-                env_ids, 7:
-            ] = self.start_joint_q.clone()
-            self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.0
-
-            # randomization
-            if self.stochastic_init:
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3] = (
-                    self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3]
-                    + 0.1
-                    * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5)
-                    * 2.0
-                )
-                angle = (
-                    (torch.rand(len(env_ids), device=self.device) - 0.5) * np.pi / 12.0
-                )
-                axis = torch.nn.functional.normalize(
-                    torch.rand((len(env_ids), 3), device=self.device) - 0.5
-                )
-                self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7] = tu.quat_mul(
-                    self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7],
-                    tu.quat_from_angle_axis(angle, axis),
-                )
-                self.state.joint_qd.view(self.num_envs, -1)[env_ids, :] = 0.5 * (
-                    torch.rand(
-                        size=(len(env_ids), self.num_joint_qd), device=self.device
-                    )
-                    - 0.5
-                )
-
-            # clear action
-            self.actions = self.actions.clone()
-            self.actions[env_ids, :] = torch.zeros(
-                (len(env_ids), self.num_actions), device=self.device, dtype=torch.float
+    def set_act(self, action):
+        if self.mtu_actuations:
+            self.model.muscle_activation = action.view(-1) * self.muscle_strengths
+        else:
+            self.state.joint_act.view(self.num_envs, -1)[:, 6:] = (
+                action * self.action_strength
             )
 
-            self.progress_buf[env_ids] = 0
+    def compute_termination(self, obs, act):
+        termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-            self.calculateObservations()
+        # an ugly fix for simulation nan values
+        joint_q = self.state.joint_q.view(self.num_environments, -1)
+        joint_qd = self.state.joint_qd.view(self.num_environments, -1)
 
-        return self.obs_buf
+        nonfinite_mask = ~(torch.isfinite(obs).sum(-1) > 0)
+        nonfinite_mask = nonfinite_mask | ~(torch.isfinite(joint_q).sum(-1) > 0)
+        nonfinite_mask = nonfinite_mask | ~(torch.isfinite(joint_qd).sum(-1) > 0)
 
-    """
-    cut off the gradient from the current state to previous states
-    """
+        invalid_value_mask = (torch.abs(joint_q) > 1e6).sum(-1) > 0
+        invalid_value_mask = (
+            invalid_value_mask | (torch.abs(joint_qd) > 1e6).sum(-1) > 0
+        )
 
-    def clear_grad(self, checkpoint=None):
-        with torch.no_grad():
-            if checkpoint is None:
-                checkpoint = {}  # NOTE: any other things to restore?
-                checkpoint["joint_q"] = self.state.joint_q.clone()
-                checkpoint["joint_qd"] = self.state.joint_qd.clone()
-                checkpoint["actions"] = self.actions.clone()
-                checkpoint["progress_buf"] = self.progress_buf.clone()
+        termination = termination | nonfinite_mask | invalid_value_mask
 
-            current_joint_q = checkpoint["joint_q"].clone()
-            current_joint_qd = checkpoint["joint_qd"].clone()
-            self.state = self.model.state()
-            self.state.joint_q = current_joint_q
-            self.state.joint_qd = current_joint_qd
-            self.actions = checkpoint["actions"].clone()
-            self.progress_buf = checkpoint["progress_buf"].clone()
+        if self.early_termination:
+            termination = termination | (obs[:, 0] < self.termination_height)
+        return termination
 
-    """
-    This function starts collecting a new trajectory from the current states but cuts off the computation graph to the previous states.
-    It has to be called every time the algorithm starts an episode and it returns the observation vectors
-    """
+    def static_init_func(self, env_ids):
+        xyz = self.start_pos[env_ids]
+        quat = self.start_rotation.repeat(len(env_ids), 1)
+        joints = self.start_joint_q.repeat(len(env_ids), 1)
+        joint_q = torch.cat((xyz, quat, joints), dim=-1)
+        joint_qd = torch.zeros((len(env_ids), self.num_joint_qd), device=self.device)
+        return joint_q, joint_qd
 
-    def initialize_trajectory(self):
-        self.clear_grad()
-        self.calculateObservations()
+    def stochastic_init_func(self, env_ids):
+        """Method for computing stochastic init state"""
+        xyz = (
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 0:3]
+            + 0.1 * (torch.rand(size=(len(env_ids), 3), device=self.device) - 0.5) * 2.0
+        )
+        angle = (torch.rand(len(env_ids), device=self.device) - 0.5) * np.pi / 12.0
+        axis = torch.nn.functional.normalize(
+            torch.rand((len(env_ids), 3), device=self.device) - 0.5
+        )
+        quat = tu.quat_mul(
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 3:7],
+            tu.quat_from_angle_axis(angle, axis),
+        )
 
-        return self.obs_buf
+        joints = (
+            self.state.joint_q.view(self.num_envs, -1)[env_ids, 7:]
+            + 0.2
+            * (
+                torch.rand(
+                    size=(len(env_ids), self.num_joint_q - 7),
+                    device=self.device,
+                )
+                - 0.5
+            )
+            * 2.0
+        )
+        joint_q = torch.cat((xyz, quat, joints), dim=-1)
+        joint_qd = 0.5 * (
+            torch.rand(size=(len(env_ids), self.num_joint_qd), device=self.device) - 0.5
+        )
+        return joint_q, joint_qd
 
-    def get_checkpoint(self):
-        checkpoint = {}
-        checkpoint["joint_q"] = self.state.joint_q.clone()
-        checkpoint["joint_qd"] = self.state.joint_qd.clone()
-        checkpoint["actions"] = self.actions.clone()
-        checkpoint["progress_buf"] = self.progress_buf.clone()
+    # def set_state_act(self, obs, act):
+    #     self.state.joint_q.view(self.num_envs, -1)[:, 1:2] = obs[:, [0]]
+    #     self.state.joint_q.view(self.num_envs, -1)[:, 3:7] = obs[:, 1:5]
+    #     self.state.joint_qd.view(self.num_envs, -1)[:, 3:6] = obs[:, 5:8]
+    #     self.state.joint_q.view(self.num_envs, -1)[:, 7:] = obs[:, 11:32]
+    #     self.state.joint_qd.view(self.num_envs, -1)[:, 6:] = (
+    #         obs[:, 32:53] / self.joint_vel_obs_scaling
+    #     )
+    #     self.state.joint_act.view(self.num_envs, -1)[:, 6:] = act
 
-        return checkpoint
-
-    def calculateObservations(self):
-        torso_pos = self.state.joint_q.view(self.num_envs, -1)[:, 0:3]
-        torso_rot = self.state.joint_q.view(self.num_envs, -1)[:, 3:7]
-        lin_vel = self.state.joint_qd.view(self.num_envs, -1)[:, 3:6]
-        ang_vel = self.state.joint_qd.view(self.num_envs, -1)[:, 0:3]
+    def observation_from_state(self, state):
+        torso_pos = state.joint_q.view(self.num_envs, -1)[:, 0:3]
+        torso_rot = state.joint_q.view(self.num_envs, -1)[:, 3:7]
+        lin_vel = state.joint_qd.view(self.num_envs, -1)[:, 3:6]
+        ang_vel = state.joint_qd.view(self.num_envs, -1)[:, 0:3]
 
         # convert the linear velocity of the torso from twist representation to the velocity of the center of mass in world frame
         lin_vel = lin_vel - torch.cross(torso_pos, ang_vel, dim=-1)
@@ -519,28 +366,26 @@ class SNUHumanoidEnv(DFlexEnv):
         up_vec = tu.quat_rotate(torso_quat, self.basis_vec1)
         heading_vec = tu.quat_rotate(torso_quat, self.basis_vec0)
 
-        self.obs_buf = torch.cat(
+        return torch.cat(
             [
                 torso_pos[:, 1:2],  # 0
                 torso_rot,  # 1:5
                 lin_vel,  # 5:8
                 ang_vel,  # 8:11
-                self.state.joint_q.view(self.num_envs, -1)[:, 7:],  # 11:33
+                state.joint_q.view(self.num_envs, -1)[:, 7:],  # 11:33
                 self.joint_vel_obs_scaling
-                * self.state.joint_qd.view(self.num_envs, -1)[:, 6:],  # 33:51
+                * state.joint_qd.view(self.num_envs, -1)[:, 6:],  # 33:51
                 up_vec[:, 1:2],  # 51
                 (heading_vec * target_dirs).sum(dim=-1).unsqueeze(-1),
             ],  # 52
             dim=-1,
         )
 
-    def calculateReward(self):
-        up_reward = 0.1 * self.obs_buf[:, 51]
-        heading_reward = self.obs_buf[:, 52]
+    def calculate_reward(self, obs, act):
+        up_reward = 0.1 * obs[:, 51]
+        heading_reward = obs[:, 52]
 
-        height_diff = self.obs_buf[:, 0] - (
-            self.termination_height + self.termination_tolerance
-        )
+        height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)
         height_reward = torch.clip(height_diff, -1.0, self.termination_tolerance)
         height_reward = torch.where(
             height_reward < 0.0, -200.0 * height_reward * height_reward, height_reward
@@ -549,61 +394,8 @@ class SNUHumanoidEnv(DFlexEnv):
             height_reward > 0.0, self.height_rew_scale * height_reward, height_reward
         )
 
-        act_penalty = (
-            torch.sum(torch.abs(self.actions), dim=-1) * self.action_penalty
-        )  # torch.sum(self.actions ** 2, dim = -1) * self.action_penalty
+        act_penalty = torch.sum(torch.abs(act), dim=-1) * self.action_penalty
 
-        progress_reward = self.obs_buf[:, 5]
+        progress_reward = obs[:, 5]
 
-        self.rew_buf = progress_reward + up_reward + heading_reward + act_penalty
-
-        # reset agents
-        self.reset_buf = torch.where(
-            self.obs_buf[:, 0] < self.termination_height,
-            torch.ones_like(self.reset_buf),
-            self.reset_buf,
-        )
-        self.reset_buf = torch.where(
-            self.progress_buf > self.episode_length - 1,
-            torch.ones_like(self.reset_buf),
-            self.reset_buf,
-        )
-
-        # an ugly fix for simulation nan values
-        nan_masks = torch.logical_or(
-            torch.isnan(self.obs_buf).sum(-1) > 0,
-            torch.logical_or(
-                torch.isnan(self.state.joint_q.view(self.num_environments, -1)).sum(-1)
-                > 0,
-                torch.isnan(self.state.joint_qd.view(self.num_environments, -1)).sum(-1)
-                > 0,
-            ),
-        )
-        inf_masks = torch.logical_or(
-            torch.isinf(self.obs_buf).sum(-1) > 0,
-            torch.logical_or(
-                torch.isinf(self.state.joint_q.view(self.num_environments, -1)).sum(-1)
-                > 0,
-                torch.isinf(self.state.joint_qd.view(self.num_environments, -1)).sum(-1)
-                > 0,
-            ),
-        )
-        invalid_value_masks = torch.logical_or(
-            (torch.abs(self.state.joint_q.view(self.num_environments, -1)) > 1e6).sum(
-                -1
-            )
-            > 0,
-            (torch.abs(self.state.joint_qd.view(self.num_environments, -1)) > 1e6).sum(
-                -1
-            )
-            > 0,
-        )
-        invalid_masks = torch.logical_or(
-            invalid_value_masks, torch.logical_or(nan_masks, inf_masks)
-        )
-
-        self.reset_buf = torch.where(
-            invalid_masks, torch.ones_like(self.reset_buf), self.reset_buf
-        )
-
-        self.rew_buf[invalid_masks] = 0.0
+        return progress_reward + up_reward + heading_reward + act_penalty
