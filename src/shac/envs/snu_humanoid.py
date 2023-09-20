@@ -265,7 +265,7 @@ class SNUHumanoidEnv(DFlexEnv):
             self.model.collide(self.state)
 
     def unscale_act(self, action):
-        return action * self.motor_scale * self.motor_strengths
+        return action
 
     def set_act(self, action):
         if self.mtu_actuations:
