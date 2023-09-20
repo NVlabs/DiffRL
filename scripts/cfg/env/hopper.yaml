@@ -42,7 +42,12 @@ ppo:
   minibatch_size: 8192
   num_actors: 1024
   horizon_length: 240
+  save_frequency: 50
+  save_best_after: 50
   actor_mlp:
     units: [128, 64, 32]
   critic_mlp:
     units: [64, 64]
+
+svg:
+  num_train_steps: 1000000
