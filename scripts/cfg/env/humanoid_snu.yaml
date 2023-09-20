@@ -1,11 +1,11 @@
-name: df_humanoid
-env_name: HumanoidEnv
+name: df_snuhumanoid
+env_name: SNUHumanoidEnv
 
 config:
-  _target_: shac.envs.HumanoidEnv
+  _target_: shac.envs.SNUHumanoidEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 256
+  num_envs: 64
   no_grad: ??? # decided based on algorithm
   stochastic_init: True
   seed: ${general.seed}
@@ -15,7 +15,7 @@ config:
 shac:
   actor_lr: 2e-3
   critic_lr: 5e-4
-  max_epochs: 2000
+  max_epochs: 5000
   target_critic_alpha: 0.995
   actor_mlp:
     units: [512, 256]
@@ -23,10 +23,12 @@ shac:
     units: [256, 256]
 
 ppo:
-  max_epochs: 5000
+  max_epochs: 20000
   minibatch_size: 8192
   num_actors: 1024
   horizon_length: 32
+  save_frequency: 500
+  save_best_after: 500
   actor_mlp:
     units: [256, 128, 64]
   critic_mlp:
