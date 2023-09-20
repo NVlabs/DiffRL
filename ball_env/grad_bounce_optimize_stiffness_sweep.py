@@ -31,9 +31,9 @@ def main():
     # iterate over different parametarisations
     sweeps = [
         {
-            "soft_contact_ke": 1e4,
+            "soft_contact_ke": 1e3,
             "soft_contact_kf": 1e0,
-            "soft_contact_kd": 1e1,
+            "soft_contact_kd": 0.5,
             "soft_contact_mu": 0.9,
             "soft_contact_margin": 1e1,
         },
@@ -63,7 +63,7 @@ def main():
     results = []
 
     print("Collecting landscape")
-    for i, params in tqdm(enumerate(sweeps[:1])):
+    for i, params in tqdm(enumerate(sweeps)):
         print("Sweep {:}/{:}".format(i + 1, len(sweeps)))
 
         temp_N = ndim * ndim
