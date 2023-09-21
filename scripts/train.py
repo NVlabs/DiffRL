@@ -189,7 +189,7 @@ def train(cfg: DictConfig):
         with open_dict(cfg):
             cfg.alg.env = cfg.env.config
         w = Workspace(cfg.alg)
-        w.run()
+        w.run_epochs()
     else:
         raise NotImplementedError
 
