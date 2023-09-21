@@ -1,7 +1,7 @@
 hand_joint_pos_err:
   reward_fn_partial: 
     _partial_: true
-    _target_: warp.envs.utils.rewards.l1_dist
+    _target_: dmanip.utils.rewards.l1_dist
   args: 
     - target_qpos
     - hand_qpos

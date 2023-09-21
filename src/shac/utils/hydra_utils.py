@@ -32,3 +32,14 @@ def omegaconf_to_dict(d: DictConfig) -> Dict:
         else:
             ret[k] = v
     return ret
+
+
+from dmanip.utils.common import ActionType, HandType, ObjectType, GoalType, RewardType
+from dmanip.envs.environment import RenderMode
+
+OmegaConf.register_new_resolver("object", lambda x: ObjectType[x.upper()])
+OmegaConf.register_new_resolver("hand", lambda x: HandType[x.upper()])
+OmegaConf.register_new_resolver("action", lambda x: ActionType[x.upper()])
+OmegaConf.register_new_resolver("goal", lambda x: GoalType[x.upper()])
+OmegaConf.register_new_resolver("reward", lambda x: RewardType[x.upper()])
+OmegaConf.register_new_resolver("render", lambda x: RenderMode[x.upper()])
