@@ -1,26 +1,52 @@
-params:
-  diff_env:
-    name: ClawWarpEnv
-    stochastic_env: True
-    episode_length: 250
-    goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
-    object_type: 8  # 0-3 are meshes, 4 - 8 are primitives
-    action_type: 0 # 0: position, 1: torque
-    rew_kw:
-      c_act: 0.
-      c_q: 10.
-      c_finger: 0.2
+defaults:
+  - _self_
+  - rewards:
+    - action_penalty
+    - object_pos_err
+
+name: claw_env
+
+env:
+  _target_: dmanip.envs.ClawWarpEnv
+  num_envs: ${resolve_default:128,${...num_envs}}
+  episode_length: 500
+  render: ${render}
+  no_grad: ???
+  # rew_params: 
+  #   action_penalty: ${...rewards.action_penalty}
+  #   object_pos_err: ${...rewards.object_pos_err}
+  #   object_joint_pos_err: ${...rewards.object_joint_pos_err}
+  stochastic_init: true
+  seed: ${general.seed}
+  action_type: ${action:position}
+  object_type: ${object:octprism}
+  goal_type: ${goal:orientation}
+  reward_type: ${reward:delta}
+
+shac:
+  actor_lr: 1e-3
+  critic_lr: 1e-2
+  actor: ActorStochasticMLP # ActorDeterministicMLP
+  actor_mlp:
+    units: [128, 64, 32]
+    activation: elu
+
+  critic: CriticMLP
+  critic_mlp:
+    units: [64, 64]
+    activation: elu
 
 
-  network:
-    actor: ActorStochasticMLP # ActorDeterministicMLP
-    actor_mlp:
-      units: [128, 64, 32]
-      activation: elu
+ppo:
+  max_epochs: 500
+  minibatch_size: 1920
+  save_interval: 100
+  save_best_after: 50
+  num_actors: 32
+  steps_num: 240
 
-    critic: CriticMLP
-    critic_mlp:
-      units: [64, 64]
-      activation: elu
-
-
+player:
+  deterministic: True
+  games_num: 12
+  num_actors: 4
+  print_stats: True

@@ -1,0 +1,61 @@
+defaults:
+  - _self_
+  - rewards:
+    - action_penalty
+    - object_pos_err
+    - reach_bonus
+    - rot_reward_delta
+
+name: repose_task
+
+score_keys:
+  - object_rot_diff
+  - object_pos_err
+  - reach_bonus
+  - action_penalty
+  - net_energy
+
+config:
+  _target_: dmanip.envs.ReposeTask
+  num_envs: ${resolve_default:256,${alg.num_envs}}
+  episode_length: 250
+  render: ${general.render}
+  reward_params: 
+    action_penalty: ${env.rewards.action_penalty}
+    object_pos_err: ${env.rewards.object_pos_err}
+      # hand_joint_pos_err: ${...rewards.hand_joint_pos_err}
+    rot_reward_delta: ${env.rewards.rot_reward_delta}
+    reach_bonus: ${env.rewards.reach_bonus}
+  hand_type: ${hand:allegro}
+  stochastic_init: true
+  use_autograd: true
+  use_graph_capture: true
+  # use_graph_capture: ${eval:'("shac" not in "${alg.name}")'}
+  # no_grad: ${eval:'("shac" not in "${alg.name}")'}
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 4e-3
+  max_epochs: 500
+  betas: [0.7, 0.95]
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+  save_interval: 100
+
+
+ppo:
+  max_epochs: 5000
+  save_best_after: 100
+  save_frequency: 400
+  num_actors: 2048
+  minibatch_size: 16384
+  steps_num: 32
+  actor_mlp:
+    units: [64, 64]
+
+player:
+  deterministic: true
+  games_num: 100000
+  print_stats: true

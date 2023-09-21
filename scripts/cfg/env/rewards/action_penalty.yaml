@@ -1,0 +1,7 @@
+action_penalty:
+  reward_fn_partial: 
+    _partial_: true
+    _target_: dmanip.utils.rewards.action_penalty
+  args: 
+    - action
+  scale: -2e-4

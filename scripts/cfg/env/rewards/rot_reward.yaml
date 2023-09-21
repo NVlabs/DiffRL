@@ -1,0 +1,8 @@
+rot_reward:
+  reward_fn_partial:
+    _partial_: true
+    _target_: dmanip.utils.rewards.rot_reward
+  args: 
+    - object_rot
+    - target_rot
+  scale: 1.0

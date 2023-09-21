@@ -1,0 +1,8 @@
+object_joint_pos_err:
+  reward_fn_partial: 
+    _partial_: true
+    _target_: dmanip.utils.rewards.l2_dist
+  args: 
+    - goal_joint_pos
+    - object_pos
+  scale: -10.0
