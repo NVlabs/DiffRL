@@ -17,15 +17,15 @@ score_keys:
 
 config:
   _target_: warp.envs.ReposeTask
-  num_envs: ${resolve_default:256,${num_envs}}
+  num_envs: 64
   episode_length: 250
-  render: ${render}
+  render: ${general.render}
   reward_params: 
-    action_penalty: ${task.rewards.action_penalty}
-    object_pos_err: ${task.rewards.object_pos_err}
+    action_penalty: ${env.rewards.action_penalty}
+    object_pos_err: ${env.rewards.object_pos_err}
       # hand_joint_pos_err: ${task.rewards.hand_joint_pos_err}
-    rot_reward_delta: ${task.rewards.rot_reward_delta}
-    reach_bonus: ${task.rewards.reach_bonus}
+    rot_reward_delta: ${env.rewards.rot_reward_delta}
+    reach_bonus: ${env.rewards.reach_bonus}
   hand_type: ${hand:allegro}
   stochastic_init: true
   use_autograd: true
