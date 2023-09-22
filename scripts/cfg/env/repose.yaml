@@ -15,8 +15,8 @@ score_keys:
   - action_penalty
   - net_energy
 
-env:
-  _target_: dmanip.envs.ReposeTask
+config:
+  _target_: warp.envs.ReposeTask
   num_envs: ${resolve_default:256,${num_envs}}
   episode_length: 250
   render: ${render}
