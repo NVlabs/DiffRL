@@ -17,22 +17,21 @@ score_keys:
   - net_energy
 
 config:
-  _target_: warp.envs.ReposeTask
-  num_envs: 32
+  _target_: dmanip.envs.ReposeTask
+  num_envs: ${resolve_default:256,${alg.num_envs}}
   episode_length: 250
   render: ${general.render}
   reward_params: 
     action_penalty: ${env.rewards.action_penalty}
     object_pos_err: ${env.rewards.object_pos_err}
-    hand_joint_pos_err: ${env.rewards.hand_joint_pos_err}
+      # hand_joint_pos_err: ${...rewards.hand_joint_pos_err}
     rot_reward_delta: ${env.rewards.rot_reward_delta}
     reach_bonus: ${env.rewards.reach_bonus}
   hand_type: ${hand:allegro}
   stochastic_init: true
   use_autograd: true
-  use_graph_capture: true
   # use_graph_capture: ${eval:'("shac" not in "${alg.name}")'}
-  no_grad: false
+  # no_grad: ${eval:'("shac" not in "${alg.name}")'}
 
 shac:
   actor_lr: 2e-3
@@ -45,20 +44,8 @@ shac:
     units: [64, 64]
   save_interval: 100
 
-shac2:
-  actor_lr: 2e-3
-  critic_lr: 4e-3
-  max_epochs: 500
-  betas: [0.7, 0.95]
-  actor_mlp:
-    units: [128, 128, 64, 32]
-  critic_mlp:
-    units: [64, 64]
-  save_interval: 400
-
-
 ppo:
-  max_epochs: 1000
+  max_epochs: 5000
   save_best_after: 100
   save_frequency: 400
   num_actors: 2048
@@ -66,7 +53,6 @@ ppo:
   steps_num: 32
   actor_mlp:
     units: [64, 64]
-  score_to_win: 60000
 
 player:
   deterministic: true

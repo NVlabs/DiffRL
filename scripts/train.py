@@ -17,6 +17,8 @@ from shac import envs
 from gym import wrappers
 from rl_games.torch_runner import Runner
 from rl_games.common import env_configurations, vecenv
+from svg.train import Workspace
+from omegaconf import OmegaConf, open_dict
 
 
 def register_envs(env_config):
@@ -124,7 +126,8 @@ def train(cfg: DictConfig):
 
     if "_target_" in cfg.alg:
         # Run with hydra
-        cfg.env.config.no_grad = not cfg.general.train
+        if "no_grad" in cfg.env.config:
+            cfg.env.config.no_grad = not cfg.general.train
 
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 
@@ -182,6 +185,12 @@ def train(cfg: DictConfig):
         runner.load(cfg_train)
         runner.reset()
         runner.run(cfg_train["params"]["general"])
+    elif cfg.alg.name == "svg":
+        cfg.env.config.no_grad = True
+        with open_dict(cfg):
+            cfg.alg.env = cfg.env.config
+        w = Workspace(cfg.alg)
+        w.run_epochs()
     else:
         raise NotImplementedError
 

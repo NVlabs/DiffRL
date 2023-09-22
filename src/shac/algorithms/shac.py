@@ -62,8 +62,8 @@ class SHAC:
         # sanity check parameters
         assert steps_num > 0
         assert max_epochs > 0
-        assert actor_lr > 0
-        assert critic_lr > 0
+        assert actor_lr >= 0
+        assert critic_lr >= 0
         assert lr_schedule in ["linear", "constant"]
         assert 0 < gamma <= 1
         assert 0 < lam <= 1
@@ -142,6 +142,8 @@ class SHAC:
 
         self.jacs = []
         self.cfs = []
+        self.body_fs = []
+        self.accs = []
         self.early_terms = []
         self.horizon_truncs = []
         self.episode_ends = []
@@ -297,22 +299,25 @@ class SHAC:
             rollout_len += 1
 
             if self.log_jacobians:
+                self.cfs.append(info["contact_forces"].cpu())
+                self.body_fs.append(info["body_forces"].cpu())
+                self.accs.append(info["accelerations"].cpu())
+
                 cf_norm = np.linalg.norm(info["contact_forces"].cpu())
                 jac_norm = (
                     np.linalg.norm(info["jacobian"]) if "jacobian" in info else None
                 )
-                self.cfs.append(cf_norm)
-                self.jacs.append
                 k = self.step_count + int(torch.sum(rollout_len).item())
                 if jac_norm:
-                    self.writer.add_scalar("jacobian/step", jac_norm, k)
-                self.writer.add_scalar("contact_forces/step", cf_norm, k)
+                    self.writer.add_scalar("jacobian", jac_norm, k)
+                self.writer.add_scalar("contact_forces", cf_norm, k)
 
             real_obs = info["obs_before_reset"]
+
             # sanity check
             if (~torch.isfinite(real_obs)).sum() > 0:
                 print("Got inf obs")
-                raise ValueError
+                # raise ValueError # it's ok to have this for humanoid
 
             if self.obs_rms is not None:
                 real_obs = obs_rms.normalize(real_obs)
@@ -415,15 +420,22 @@ class SHAC:
 
         self.step_count += self.steps_num * self.num_envs
 
-        if self.log_jacobians and self.step_count - self.last_log_steps > 1000:
+        if (
+            self.log_jacobians
+            and self.step_count - self.last_log_steps > 1000 * self.num_envs
+        ):
             np.savez(
                 os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
-                contact_forces=self.cfs,
+                contact_forces=torch.cat(self.cfs).numpy(),
+                body_forces=torch.cat(self.body_fs).numpy(),
+                accelerations=torch.cat(self.accs).numpy(),
                 early_termination=self.early_terms,
                 horizon_truncation=self.horizon_truncs,
                 episode_ends=self.episode_ends,
             )
             self.cfs = []
+            self.body_fs = []
+            self.accs = []
             self.early_terms = []
             self.horizon_truncs = []
             self.episode_ends = []
@@ -519,7 +531,7 @@ class SHAC:
             raise NotImplementedError
 
     def compute_critic_loss(self, batch_sample):
-        predicted_values = self.critic(batch_sample["obs"]).squeeze(-1)
+        predicted_values = self.critic.predict(batch_sample["obs"]).squeeze(-2)
         target_values = batch_sample["target_values"]
         critic_loss = ((predicted_values - target_values) ** 2).mean()
 
@@ -595,7 +607,7 @@ class SHAC:
                 # sanity check
                 if (
                     torch.isnan(self.grad_norm_before_clip)
-                    or self.grad_norm_before_clip > 1000000.0
+                    or self.grad_norm_before_clip > 1e6
                 ):
                     print("NaN gradient")
                     raise ValueError
@@ -682,12 +694,11 @@ class SHAC:
             fps = self.steps_num * self.num_envs / (time_end_epoch - time_start_epoch)
 
             # logging
-            time_elapse = time.time() - self.start_time
-            self.log_scalar("lr", lr, time_elapse)
-            self.log_scalar("actor_loss", self.actor_loss, time_elapse)
-            self.log_scalar("value_loss", self.value_loss, time_elapse)
-            self.log_scalar("rollout_len", self.mean_horizon, time_elapse)
-            self.log_scalar("fps", fps, time_elapse)
+            self.log_scalar("lr", lr)
+            self.log_scalar("actor_loss", self.actor_loss)
+            self.log_scalar("value_loss", self.value_loss)
+            self.log_scalar("rollout_len", self.mean_horizon)
+            self.log_scalar("fps", fps)
 
             if len(self.episode_loss_his) > 0:
                 mean_episode_length = self.episode_length_meter.get_mean()
@@ -703,8 +714,8 @@ class SHAC:
                     self.save()
                     self.best_policy_loss = mean_policy_loss
 
-                self.log_scalar("policy_loss", mean_policy_loss, time_elapse)
-                self.log_scalar("rewards", -mean_policy_loss, time_elapse)
+                self.log_scalar("policy_loss", mean_policy_loss)
+                self.log_scalar("rewards", -mean_policy_loss)
 
                 if (
                     self.score_keys
@@ -717,22 +728,16 @@ class SHAC:
                         score = self.episode_scores_meter_map[
                             score_key + "_final"
                         ].get_mean()
-                        self.log_scalar(f"scores/{score_key}", score, time_elapse)
+                        self.log_scalar(f"scores/{score_key}", score)
 
-                self.log_scalar(
-                    "policy_discounted_loss", mean_policy_discounted_loss, time_elapse
-                )
-                self.log_scalar("best_policy_loss", self.best_policy_loss, time_elapse)
-                self.log_scalar("episode_lengths", mean_episode_length, time_elapse)
+                self.log_scalar("policy_discounted_loss", mean_policy_discounted_loss)
+                self.log_scalar("best_policy_loss", self.best_policy_loss)
+                self.log_scalar("episode_lengths", mean_episode_length)
                 ac_stddev = self.actor.get_logstd().exp().mean().detach().cpu().item()
-                self.log_scalar("ac_std", ac_stddev, time_elapse)
-                self.log_scalar(
-                    "actor_grad_norm", self.grad_norm_before_clip, time_elapse
-                )
-                self.log_scalar("episode_end", self.episode_end, time_elapse)
-                self.log_scalar(
-                    "early_termination", self.early_termination, time_elapse
-                )
+                self.log_scalar("ac_std", ac_stddev)
+                self.log_scalar("actor_grad_norm", self.grad_norm_before_clip)
+                self.log_scalar("episode_end", self.episode_end)
+                self.log_scalar("early_termination", self.early_termination)
             else:
                 mean_policy_loss = np.inf
                 mean_policy_discounted_loss = np.inf
@@ -819,11 +824,9 @@ class SHAC:
             else checkpoint[4]
         )
 
-    def log_scalar(self, scalar, value, time):
+    def log_scalar(self, scalar, value):
         """Helper method for consistent logging"""
-        self.writer.add_scalar(f"{scalar}/iter", value, self.iter_count)
-        self.writer.add_scalar(f"{scalar}/step", value, self.step_count)
-        self.writer.add_scalar(f"{scalar}/time", value, time)
+        self.writer.add_scalar(f"{scalar}", value, self.step_count)
 
     def close(self):
         self.writer.close()

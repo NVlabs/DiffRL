@@ -5,7 +5,7 @@ actor_config:
   units: ${resolve_child:[64,64],${env.shac.actor_mlp},units}
   activation: elu
 critic_config:
-  _target_: shac.models.critic.CriticMLP
+  _target_: shac.models.critic.DoubleCriticMLP
   units: ${resolve_child:[64,64],${env.shac.critic_mlp},units}
   activation: elu
 actor_lr: ${resolve_child:2e-3,${env.shac},actor_lr}
@@ -14,7 +14,7 @@ h_lr: 1e-4
 lr_schedule: linear
 obs_rms: True
 ret_rms: False
-critic_iterations: 16
+critic_iterations: ${resolve_child:null,${env.shac},critic_iterations}
 critic_batches: 4
 critic_method: td-lambda # ('td-lambda', 'one-step')
 lam: 0.95

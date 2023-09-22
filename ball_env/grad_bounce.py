@@ -26,10 +26,6 @@ def main():
     H = 40
     clip = 5.0
 
-    w = np.random.normal(0.0, std, (N, m))
-    w[0] = 0.0  # for baseline
-    ww = np.append(w, np.zeros((N, 1)), axis=1)
-
     fobgs = []
     zobgs = []
     losses = []
@@ -37,6 +33,7 @@ def main():
 
     for h in tqdm(range(1, H + 1)):
         env = Bounce(num_envs=N, num_steps=h, profile=False, render=False)
+        w = env.noise_[:, :2]
 
         param = env.states[0].particle_qd
 
@@ -47,6 +44,7 @@ def main():
         tape.backward(l)
         fobg = tape.gradients[param].numpy()
         fobg = fobg[:, :2]
+
         # gradient clipping by value
         # print(np.sum(np.abs(fobg) > clip))
         # fobg = np.clip(fobg, -clip, clip)
@@ -54,6 +52,7 @@ def main():
         # gradient clipping by norm
         # if np.any(fobg > clip):
         # fobg = clip * fobg / np.linalg.norm(fobg)
+
         tape.zero()
         loss = loss.numpy()
 

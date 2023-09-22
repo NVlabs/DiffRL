@@ -6,6 +6,7 @@
 tags
 **.out
 **.log
+**.pdf
 
 dflex/dflex/kernels*/
 **logs/
@@ -19,3 +20,5 @@ multirun/
 
 scripts/sweeps/
 scripts/outputs
+scripts/runs/
+good-shit

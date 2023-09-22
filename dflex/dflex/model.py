@@ -386,42 +386,49 @@ class Model:
             )
 
             # derived rigid body data (maximal coordinates)
+            # body transform in world coordinates
             s.body_X_sc = torch.empty(
                 (self.link_count, 7),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # relative transform from body frame to its center of mass
             s.body_X_sm = torch.empty(
                 (self.link_count, 7),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # spatial inertia matrix 6x6 that encodes the center of mass, mass, and local 3x3 inertia matrix in one
             s.body_I_s = torch.empty(
                 (self.link_count, 6, 6),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # spatial body velocity in world coordinates
             s.body_v_s = torch.empty(
                 (self.link_count, 6),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # spatial body acceleration in world coordinates
             s.body_a_s = torch.empty(
                 (self.link_count, 6),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # external forces applied to the bodies in world coordinates
             s.body_f_s = torch.zeros(
                 (self.link_count, 6),
                 dtype=torch.float32,
                 device=self.adapter,
                 requires_grad=True,
             )
+            # contact forces
             s.contact_f = torch.zeros(
                 (self.link_count, 6),
                 dtype=torch.float32,
