@@ -11,7 +11,7 @@ config:
   num_envs: 128
   episode_length: 500
   render: ${general.render}
-  no_grad: False
+  no_grad: ???
   # rew_params: 
   #   action_penalty: ${...rewards.action_penalty}
   #   object_pos_err: ${...rewards.object_pos_err}
