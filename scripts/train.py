@@ -126,8 +126,8 @@ def train(cfg: DictConfig):
 
     if "_target_" in cfg.alg:
         # Run with hydra
-        if "no_grad" in cfg.env.config:
-            cfg.env.config.no_grad = not cfg.general.train
+        # if "no_grad" in cfg.env.config:
+        cfg.env.config.no_grad = not cfg.general.train
 
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 

@@ -16,8 +16,8 @@ score_keys:
   - net_energy
 
 config:
-  _target_: warp.envs.ReposeTask
-  num_envs: 64
+  _target_: dmanip.envs.ReposeTask
+  num_envs: 128
   episode_length: 250
   render: ${general.render}
   reward_params: 
@@ -31,15 +31,25 @@ config:
   use_autograd: true
   use_graph_capture: true
   # use_graph_capture: ${eval:'("shac" not in "${alg.name}")'}
-  # no_grad: ${eval:'("shac" not in "${alg.name}")'}
+  no_grad: ???
+
+
+shac:
+  actor_lr: 3e-4
+  critic_lr: 3e-4
+  actor_mlp:
+    units: [128, 64, 32]
+    activation: elu
+  critic_mlp:
+    units: [64, 64]
 
 
 ppo:
   max_epochs: 5000
   save_best_after: 100
   save_frequency: 400
-  num_actors: 2048
-  minibatch_size: 16384
+  num_actors: 256
+  minibatch_size: 2048
   steps_num: 32
   actor_mlp:
     units: [64, 64]
