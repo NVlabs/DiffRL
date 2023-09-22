@@ -6,12 +6,12 @@ defaults:
 
 name: claw_env
 
-env:
+config:
   _target_: dmanip.envs.ClawWarpEnv
-  num_envs: ${resolve_default:128,${...num_envs}}
+  num_envs: 128
   episode_length: 500
-  render: ${render}
-  no_grad: ???
+  render: ${general.render}
+  no_grad: False
   # rew_params: 
   #   action_penalty: ${...rewards.action_penalty}
   #   object_pos_err: ${...rewards.object_pos_err}
