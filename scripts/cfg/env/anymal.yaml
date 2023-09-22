@@ -1,6 +1,6 @@
-name: df_ant
+name: df_anymal
 config:
-  _target_: shac.envs.AntEnv
+  _target_: shac.envs.AnymalEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 512
@@ -17,14 +17,14 @@ shac:
   max_epochs: 2000
   target_critic_alpha: 0.2
   actor_mlp:
-    units: [128, 64, 32]
+    units: [256, 128]
   critic_mlp:
-    units: [64, 64]
+    units: [256, 128]
 
 ppo:
   max_epochs: 5000
-  minibatch_size: 16384
-  num_actors: 2048
+  minibatch_size: 8192
+  num_actors: 1024
   horizon_length: 32
   save_frequency: 500
   save_best_after: 500

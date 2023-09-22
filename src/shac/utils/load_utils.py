@@ -152,8 +152,10 @@ def urdf_load(
     shape_mu=0.25,
     limit_ke=100.0,
     limit_kd=1.0,
+    robot=None,
 ):
-    robot = urdfpy.URDF.load(filename)
+    if robot is None:
+        robot = urdfpy.URDF.load(filename)
 
     # maps from link name -> link index
     link_index = {}

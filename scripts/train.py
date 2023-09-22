@@ -84,7 +84,7 @@ def create_wandb_run(wandb_cfg, job_config, run_id=None):
     try:
         alg_name = job_config["alg"]["_target_"].split(".")[-1]
     except:
-        alg_name = "PPO"
+        alg_name = job_config["alg"]["name"].upper()
     try:
         # Multirun config
         job_id = HydraConfig().get().job.num
