@@ -48,6 +48,11 @@ class AnymalEnv(DFlexEnv):
         nan_state_fix=False,
         jacobian_norm=None,
         reset_all=False,
+        termination_height=0.25,
+        action_penalty=-0.005,
+        up_rew_scale=0.1,
+        heading_rew_scale=1.0,
+        heigh_rew_scale=1.0,
     ):
         num_obs = 49
         num_act = 12
@@ -72,11 +77,16 @@ class AnymalEnv(DFlexEnv):
         self.early_termination = early_termination
         self.init_sim()
 
-        # other parameters
-        self.termination_height = 0.25
-        self.action_strength = 200.0  # 0.5  # NOTE: looks too small?
-        self.action_penalty = -0.000025
+        # MDP parameters
+        self.action_strength = 200.0
         self.joint_vel_obs_scaling = 0.1
+
+        # reward parameters
+        self.termination_height = termination_height
+        self.action_penalty = action_penalty
+        self.up_rew_scale = up_rew_scale
+        self.heading_rew_scale = heading_rew_scale
+        self.heigh_rew_scale = heigh_rew_scale
 
         self.setup_visualizer(logdir)
 
@@ -165,13 +175,13 @@ class AnymalEnv(DFlexEnv):
                 floating=True,
                 stiffness=85.0,  # from config
                 damping=2.0,  # from config
-                shape_ke=4.0e4,
-                shape_kd=1.0e4,
-                shape_kf=3.0e3,
+                shape_ke=2.0e3,
+                shape_kd=5.0e2,
+                shape_kf=1.0e2,
                 shape_mu=0.75,
                 limit_ke=1.0e3,
                 limit_kd=1.0e1,
-                armature=0.05,
+                armature=0.006,
             )
             self.start_pos.append(start_pos)
 
@@ -203,8 +213,24 @@ class AnymalEnv(DFlexEnv):
 
     def compute_termination(self, obs, act):
         termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        # an ugly fix for simulation nan values
+        joint_q = self.state.joint_q.view(self.num_environments, -1)
+        joint_qd = self.state.joint_qd.view(self.num_environments, -1)
+
+        nonfinite_mask = ~(torch.isfinite(obs).sum(-1) > 0)
+        nonfinite_mask = nonfinite_mask | ~(torch.isfinite(joint_q).sum(-1) > 0)
+        nonfinite_mask = nonfinite_mask | ~(torch.isfinite(joint_qd).sum(-1) > 0)
+
+        invalid_value_mask = (torch.abs(joint_q) > 1e6).sum(-1) > 0
+        invalid_value_mask = (
+            invalid_value_mask | (torch.abs(joint_qd) > 1e6).sum(-1) > 0
+        )
+
+        termination = termination | nonfinite_mask | invalid_value_mask
+
         if self.early_termination:
-            termination = obs[:, 0] < self.termination_height
+            termination = termination | (obs[:, 0] < self.termination_height)
         return termination
 
     def static_init_func(self, env_ids):
@@ -303,20 +329,10 @@ class AnymalEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 0.1 * obs[:, 35]
-        heading_reward = obs[:, 36]
-        height_reward = obs[:, 0] - self.termination_height
+        up_rew = self.up_rew_scale * obs[:, 35]
+        heading_rew = self.heading_rew_scale * obs[:, 36]
+        height_rew = self.heigh_rew_scale * (obs[:, 0] - self.termination_height)
+        progress_rew = obs[:, 5]  # forward velocity
+        act_penalty = self.action_penalty * torch.sum(act**2, dim=-1)
 
-        progress_reward = obs[:, 5]  # forward velocity
-
-        act_penalty = torch.sum(act**2, dim=-1) * self.action_penalty
-
-        # print("act_penalty", act_penalty)
-        # print("height_reward", height_reward)
-        # print("heading_reward", heading_reward)
-        # print("up_reward", up_reward)
-        # print("progress_reward", progress_reward)
-
-        return (
-            progress_reward + up_reward + heading_reward + height_reward + act_penalty
-        )
+        return progress_rew + up_rew + heading_rew + height_rew + act_penalty

@@ -239,7 +239,6 @@ class DFlexEnv:
         done = termination | truncation
         env_ids = done.nonzero(as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
-            # print("reseting", env_ids)
             self.reset(env_ids)
 
         self.render()

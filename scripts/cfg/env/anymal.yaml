@@ -3,18 +3,24 @@ config:
   _target_: shac.envs.AnymalEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 512
+  num_envs: 128
   stochastic_init: True
   seed: ${general.seed}
   no_grad: ??? # decided based on algorithm
   episode_length: 1000
   MM_caching_frequency: 16
   early_termination: True
+  nan_state_fix: True
+  termination_height: 0.25
+  action_penalty: -5e-3
+  up_rew_scale: 0.1
+  heading_rew_scale: 1.0
+  heigh_rew_scale: 1.0
 
 shac:
   actor_lr: 2e-3
   critic_lr: 2e-3
-  max_epochs: 2000
+  max_epochs: 5000
   target_critic_alpha: 0.2
   actor_mlp:
     units: [256, 128]
@@ -23,15 +29,16 @@ shac:
 
 ppo:
   max_epochs: 5000
-  minibatch_size: 8192
-  num_actors: 1024
+  minibatch_size: 16384
+  num_actors: 2048
   horizon_length: 32
   save_frequency: 500
   save_best_after: 500
   actor_mlp:
-    units: [128, 64, 32]
+    units: [256, 128, 64]
   critic_mlp:
-    units: [128, 64, 32]
+    units: [256, 128, 64]
 
 svg:
-  num_train_steps: 
+  num_train_steps: 1e7
+  replay_buffer_capacity: 1e6
