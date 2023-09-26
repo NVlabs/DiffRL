@@ -313,11 +313,11 @@ class AHAC:
             # contact truncation
             # defaults to jacobian truncation if they are available, otherwise
             # uses contact forces since they are always available
-            # TODO do contact normalisation again
             cfs = info["contact_forces"]
             acc = info["accelerations"]
-            # cfs_normalised = torch.where(acc != 0.0, cfs / acc, torch.zeros_like(cfs))
-            cfs_normalised = cfs
+            acc[acc > 0] = torch.clip(acc[acc > 0], 1.0, torch.inf)
+            acc[acc < 0] = torch.clip(acc[acc < 0], -torch.inf, -1.0)
+            cfs_normalised = torch.where(acc != 0.0, cfs / acc, torch.zeros_like(cfs))
             self.cfs[rollout_len] = torch.norm(cfs_normalised, dim=(-2, -1)).squeeze()
             contact_trunc = self.cfs[rollout_len].item() > self.contact_th
             if self.acc_jacobians:
@@ -328,12 +328,8 @@ class AHAC:
             assert len(contact_trunc) == self.num_envs
 
             if self.log_jacobians:
-                jac_norm = torch.norm(info["jacobian"]) if "jacobian" in info else None
                 k = self.step_count + int(torch.sum(rollout_len).item())
-                self.writer.add_scalar("contact_forces", cfs_normalised, k)
-
-                if jac_norm:
-                    self.writer.add_scalar("jacobian", jac_norm, k)
+                self.writer.add_scalar("contact_forces", self.cfs[rollout_len], k)
 
             real_obs = info["obs_before_reset"]
 
@@ -458,7 +454,7 @@ class AHAC:
         if self.log_jacobians and self.step_count - self.last_log_steps > 1000:
             np.savez(
                 os.path.join(self.log_dir, f"truncation_analysis_{self.episode}"),
-                contact_forces=self.cfs,
+                contact_forces=self.cfs.detach().cpu().numpy(),
                 early_termination=self.early_terms,
                 contact_truncation=self.conatct_truncs,
                 horizon_truncation=self.horizon_truncs,
@@ -801,7 +797,7 @@ class AHAC:
                 mean_episode_length = 0
 
             print(
-                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, rollout {:}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, contact/horizon/end {:}/{:}/{:}, grad norm before/after clip {:.2f}/{:.2f}".format(
+                "iter {:}/{:}, ep loss {:.2f}, ep discounted loss {:.2f}, ep len {:.1f}, rollout {:}, avg rollout {:.1f}, total steps {:}, fps {:.2f}, value loss {:.2f}, contact/horizon/term/end {:}/{:}/{:}/{:}, grad norm before/after clip {:.2f}/{:.2f}".format(
                     self.iter_count,
                     self.max_epochs,
                     mean_policy_loss,
@@ -814,6 +810,7 @@ class AHAC:
                     self.value_loss,
                     self.contact_trunc,
                     self.horizon_trunc,
+                    self.early_termination,
                     self.episode_end,
                     self.grad_norm_before_clip,
                     self.grad_norm_after_clip,

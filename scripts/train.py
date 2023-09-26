@@ -129,6 +129,10 @@ def train(cfg: DictConfig):
         # if "no_grad" in cfg.env.config:
         cfg.env.config.no_grad = not cfg.general.train
 
+        if "AHAC" in cfg.alg._target_ and "jacobian_norm" in cfg.env.ahac:
+            with open_dict(cfg):
+                cfg.env.config.jacobian_norm = cfg.env.ahac.jacobian_norm
+
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 
         if cfg.general.checkpoint:
