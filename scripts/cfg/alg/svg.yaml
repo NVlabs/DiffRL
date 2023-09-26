@@ -1,23 +1,24 @@
 name: svg
-num_train_steps: ${resolve_child:1000000,${env.svg},num_train_steps}
-replay_buffer_capacity: min(${alg.num_train_steps}, 1e6)
-num_seed_steps: 1000
+num_train_steps: ${resolve_child:10000000,${env.svg},num_train_steps}
+replay_buffer_capacity: ${resolve_child:1e6,${env.svg},replay_buffer_capacity}
+num_seed_steps: 500
 eval_freq: 10000 # Over-ridden by env
 num_eval_episodes: ${env.player.games_num}
 fixed_eval: false
+steps_num: 32
 
 pixels: false
 normalize_obs: true
 
 device: ${general.device}
-action_repeat: 1
+action_repeat: 0
 
 log_freq: 10000
 log_save_tb: ${general.run_wandb}
 score_keys: [] # I think this is for extra logging but unsrue
 
 save_video: false
-delete_replay_at_end: true
+delete_replay_at_end: false # TODO need to fix
 
 save_freq: 100000
 save_best_eval: true
@@ -29,8 +30,8 @@ seed: ${general.seed}
 num_initial_states: null # Use a subset of initial states
 max_episode_steps: ${env.config.episode_length}
 
-model_free_hidden_dim: 512
-model_free_hidden_depth: 4
+model_free_hidden_dim: 128
+model_free_hidden_depth: 2
 obs_dim: 11 # TODO get in code
 action_dim: 3 # TODO get in code
 action_range: [-1.0, 1.0] # TODO get in code
@@ -74,13 +75,13 @@ agent:
   model_update_freq: 1
   model_update_repeat: 4
 
-  model_free_update_repeat: 1
+  model_free_update_repeat: 5
 
-  rew_hidden_dim: 512
+  rew_hidden_dim: 128
   rew_hidden_depth: 2
   rew_lr: 1e-3
 
-  done_hidden_dim: 512
+  done_hidden_dim: 128
   done_hidden_depth: 2
   done_lr: 1e-3
   done_ctrl_accum: true
@@ -98,15 +99,15 @@ dx:
   horizon: ${alg.agent.horizon}
   device: ${general.device}
   detach_xt: true
-  xu_enc_hidden_dim: 512
+  xu_enc_hidden_dim: 128
   xu_enc_hidden_depth: 2
-  x_dec_hidden_dim: 512
+  x_dec_hidden_dim: 128
   x_dec_hidden_depth: 0
   clip_grad_norm: 1.0
   rec_type: GRU
-  rec_latent_dim: 512
+  rec_latent_dim: 128
   rec_num_layers: 2
-  lr: 1e-3
+  lr: 1e-4
 
 normal_actor:
   _target_: svg.actor.Actor

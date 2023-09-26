@@ -33,5 +33,15 @@ ppo:
   critic_mlp:
     units: [128, 64, 32]
 
+sac:
+  max_epochs: 5000
+  batch_size: 4096
+  num_actors: 128
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
+    units: [128, 64, 32]
+
 svg:
-  num_train_steps: 
+  num_train_steps: 1e7
+  replay_buffer_capacity: 1e6

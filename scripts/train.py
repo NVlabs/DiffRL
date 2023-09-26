@@ -139,7 +139,7 @@ def train(cfg: DictConfig):
         else:
             traj_optimizer.run(cfg.env.player.games_num)
 
-    elif cfg.alg.name == "ppo":
+    elif cfg.alg.name == "ppo" or cfg.alg.name == "sac":
         # if not hydra init, then we must have PPO
         # to set up RL games we have to do a bunch of config menipulation
         # which makes it a huge mess...
@@ -173,7 +173,10 @@ def train(cfg: DictConfig):
             yaml.dump(cfg_train, open(os.path.join(logdir, "cfg.yaml"), "w"))
 
         # register envs with the correct number of actors for PPO
-        cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+        if cfg.alg.name == "ppo":
+            cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+        else:
+            cfg["env"]["config"]["num_envs"] = cfg["env"]["sac"]["num_actors"]
         register_envs(cfg.env)
 
         # add observer to score keys

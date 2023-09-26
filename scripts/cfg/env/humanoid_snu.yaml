@@ -23,7 +23,7 @@ shac:
     units: [256, 256]
 
 ppo:
-  max_epochs: 20000
+  max_epochs: 50000
   minibatch_size: 8192
   num_actors: 1024
   horizon_length: 32
