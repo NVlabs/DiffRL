@@ -50,6 +50,7 @@ ppo:
   critic_mlp:
     units: [64, 64]
 
+# Note SVG doesn't like floats so we use ints
 svg:
-  num_train_steps: 10000000
+  num_train_steps: 11000000 # 11M
   replay_buffer_capacity: 1000000

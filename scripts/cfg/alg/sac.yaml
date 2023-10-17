@@ -42,7 +42,7 @@ params:
     lr_schedule: adaptive
     lr_threshold: 0.008
     kl_threshold: 0.008
-    score_to_win: 20000
+    score_to_win: 200000000 # never stop training
     max_epochs: ${resolve_child:5000,${env.sac},max_epochs}
     num_steps_per_episode: 128
     save_best_after: ${resolve_child:100,${env.sac},save_best_after}

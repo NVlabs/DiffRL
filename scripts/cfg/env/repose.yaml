@@ -1,10 +1,10 @@
 defaults:
   - _self_
   - rewards:
-    - action_penalty
-    - object_pos_err
-    - reach_bonus
-    - rot_reward_delta
+      - action_penalty
+      - object_pos_err
+      - reach_bonus
+      - rot_reward_delta
 
 name: warp_repose_task
 
@@ -20,9 +20,10 @@ config:
   num_envs: 128
   episode_length: 250
   render: ${general.render}
-  reward_params: 
+  reward_params:
     action_penalty: ${env.rewards.action_penalty}
-    object_pos_err: ${env.rewards.object_pos_err}
+    object_pos_err:
+      ${env.rewards.object_pos_err}
       # hand_joint_pos_err: ${task.rewards.hand_joint_pos_err}
     rot_reward_delta: ${env.rewards.rot_reward_delta}
     reach_bonus: ${env.rewards.reach_bonus}
@@ -33,7 +34,6 @@ config:
   # use_graph_capture: ${eval:'("shac" not in "${alg.name}")'}
   no_grad: ???
 
-
 shac:
   actor_lr: 3e-4
   critic_lr: 3e-4
@@ -42,7 +42,6 @@ shac:
     activation: elu
   critic_mlp:
     units: [64, 64]
-
 
 ppo:
   max_epochs: 5000
@@ -58,3 +57,8 @@ player:
   deterministic: true
   games_num: 100000
   print_stats: true
+
+# Note SVG doesn't like floats so we use ints
+svg:
+  num_train_steps: 11000000 # 11M
+  replay_buffer_capacity: 1000000

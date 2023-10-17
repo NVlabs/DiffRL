@@ -1,7 +1,7 @@
 name: svg
 num_train_steps: ${resolve_child:10000000,${env.svg},num_train_steps}
 replay_buffer_capacity: ${resolve_child:1e6,${env.svg},replay_buffer_capacity}
-num_seed_steps: 500
+num_seed_steps: 10240
 eval_freq: 10000 # Over-ridden by env
 num_eval_episodes: ${env.player.games_num}
 fixed_eval: false
@@ -35,7 +35,6 @@ model_free_hidden_depth: 2
 obs_dim: 11 # TODO get in code
 action_dim: 3 # TODO get in code
 action_range: [-1.0, 1.0] # TODO get in code
-
 
 agent:
   _target_: svg.agent.SACSVGAgent

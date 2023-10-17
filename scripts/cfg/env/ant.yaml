@@ -42,6 +42,7 @@ sac:
   actor_critic_mlp:
     units: [128, 64, 32]
 
+# Note SVG doesn't like floats so we use ints
 svg:
-  num_train_steps: 1e7
-  replay_buffer_capacity: 1e6
+  num_train_steps: 11000000 # 11M
+  replay_buffer_capacity: 1000000
