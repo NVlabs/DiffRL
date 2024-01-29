@@ -7,7 +7,7 @@
 
 import os
 import sys
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -49,7 +49,7 @@ class DFlexEnv:
         df.config.no_grad = self.no_grad
         self.nan_state_fix = nan_state_fix
         self.jacobian_norm = jacobian_norm
-        # if true resets all envs on early termination
+        # if true resets all envs on earfly termination
         self.reset_all = reset_all
         self.stochastic_init = stochastic_init
         self.jacobian = jacobian
@@ -83,7 +83,7 @@ class DFlexEnv:
         )
 
         # allocate buffers
-        self.obs_buf = torch.zeros(
+        self.obs_buf: torch.Tensor = torch.zeros(
             (self.num_envs, self.num_observations),
             device=self.device,
             dtype=torch.float,
@@ -152,16 +152,17 @@ class DFlexEnv:
 
             def create_hook():
                 def hook(grad):
-                    if torch.norm(grad) > self.jacobian_norm:
-                        grad = grad / (torch.norm(grad) + 1e-9) * self.jacobian_norm
+                    mask = torch.norm(grad, dim=1) > self.jacobian_norm
+                    if torch.any(mask):
+                        grad[mask] /= (torch.norm(grad, dim=1)[mask] + 1e-9).view(
+                            (-1, 1)
+                        ) * self.jacobian_norm
                     return grad
 
                 return hook
 
-            if self.state.joint_q.requires_grad:
-                self.state.joint_q.register_hook(create_hook())
-            if self.state.joint_qd.requires_grad:
-                self.state.joint_qd.register_hook(create_hook())
+            if self.obs_buf.requires_grad:
+                self.obs_buf.register_hook(create_hook())
             if actions.requires_grad:
                 actions.register_hook(create_hook())
 
@@ -217,7 +218,9 @@ class DFlexEnv:
                 "termination": termination,
                 "truncation": truncation,
                 "contact_count": self.state.contact_count.clone().detach(),
-                "contact_forces": self.state.contact_f.clone().detach(),
+                "contact_forces": self.state.contact_f.clone()
+                .detach()
+                .view(self.num_envs, -1, 6),
             }
 
             if self.jacobian and not play:

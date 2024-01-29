@@ -134,7 +134,7 @@ def train(cfg: DictConfig):
         if cfg.general.train:
             traj_optimizer.train()
         else:
-            traj_optimizer.eval(cfg.env.player.games_num)
+            traj_optimizer.run(cfg.env.player.games_num)
 
     elif cfg.alg.name == "ppo":
         # if not hydra init, then we must have PPO

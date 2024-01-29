@@ -15,17 +15,19 @@ from .snu_humanoid import SNUHumanoidEnv
 
 try:
     from warp.envs.obj_env import ObjectTask
+    from warp.envs.hopper import HopperEnv as HopperWarpEnv
     from warp.envs.hand_env import HandObjectTask
     from warp.envs.repose_task import ReposeTask
     from warp.envs.articulate_task import ArticulateTask
-    from warp.envs.hopper import HopperEnv as HopperWarpEnv
-except ImportError:
+except ImportError as e:
     print("ERROR: warp envs not found, skipping warp envs")
+    print(e)
     pass
 
 # dmanip envs
 try:
     from dmanip.envs import WarpEnv, ClawWarpEnv, AllegroWarpEnv
-except ImportError:
+except ImportError as e:
     print("ERROR: dmanip not found, skipping dmanip envs")
+    print(e)
     pass
