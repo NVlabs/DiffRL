@@ -37,6 +37,7 @@ class SHAC:
         max_epochs: int,  # number of short rollouts to do (i.e. epochs)
         train: bool,  # if False, we only eval the policy
         logdir: str,
+        name: str = "shac",
         grad_norm: Optional[float] = None,  # clip actor and ciritc grad norms
         critic_grad_norm: Optional[float] = None,
         actor_lr: float = 2e-3,
@@ -74,7 +75,7 @@ class SHAC:
         assert 0 < target_critic_alpha <= 1.0
         assert save_interval > 0
         assert eval_runs >= 0
-
+        
         # Create environment
         self.env = instantiate(env_config, logdir=logdir)
         print("num_envs = ", self.env.num_envs)
@@ -111,7 +112,7 @@ class SHAC:
             self.ret_rms = RunningMeanStd(shape=(), device=self.device)
 
         env_name = self.env.__class__.__name__
-        self.name = self.__class__.__name__ + "_" + env_name
+        self.name = name + "_" + env_name
 
         self.grad_norm = grad_norm
         self.critic_grad_norm = critic_grad_norm
