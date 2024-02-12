@@ -6,9 +6,10 @@ channels:
 dependencies:
   - python=3.8
   - pytorch-cuda=11.8
-  - torchvision
+  - pytorch==1.13.*
   - cuda=11.8
   - cuda-toolkit=11.8
+  - numpy==1.23.*
   - pandas
   - matplotlib
   - seaborn
@@ -18,6 +19,9 @@ dependencies:
       - usd-core
       - hydra-core
       - tqdm
-      - pytinydiffsim
-      - gym
       - wandb
+      - torchopt
+      - black
+      - tensorboardX
+      - rl_games==1.5.*
+      - torchviz

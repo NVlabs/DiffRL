@@ -10,6 +10,7 @@ tags
 
 dflex/dflex/kernels*/
 **logs/
+jobs/
 
 **data/
 **.egg-info/

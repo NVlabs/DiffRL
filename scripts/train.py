@@ -88,7 +88,7 @@ def create_wandb_run(wandb_cfg, job_config, run_id=None):
     try:
         # Multirun config
         job_id = HydraConfig().get().job.num
-        name = f"{alg_name}_{env_name}_sweep_{job_id}"
+        name = f"{alg_name}_{env_name}_sweep_{job_config['general']['seed']}"
         notes = wandb_cfg.get("notes", None)
     except:
         # Normal (singular) run config
@@ -128,10 +128,6 @@ def train(cfg: DictConfig):
         # Run with hydra
         # if "no_grad" in cfg.env.config:
         cfg.env.config.no_grad = not cfg.general.train
-
-        if "AHAC" in cfg.alg._target_ and "jacobian_norm" in cfg.env.ahac:
-            with open_dict(cfg):
-                cfg.env.config.jacobian_norm = cfg.env.ahac.jacobian_norm
 
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 

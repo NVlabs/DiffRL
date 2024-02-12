@@ -61,7 +61,7 @@ class SHAC:
     ):
         # sanity check parameters
         assert steps_num > 0
-        assert max_epochs > 0
+        assert max_epochs >= 0
         assert actor_lr >= 0
         assert critic_lr >= 0
         assert lr_schedule in ["linear", "constant"]
@@ -609,7 +609,7 @@ class SHAC:
                     torch.isnan(self.grad_norm_before_clip)
                     or self.grad_norm_before_clip > 1e6
                 ):
-                    print("NaN gradient")
+                    print("ERROR: NaN gradient")
                     raise ValueError
 
             self.time_report.end_timer("compute actor loss")
