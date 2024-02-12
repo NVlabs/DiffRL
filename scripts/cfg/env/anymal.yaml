@@ -1,6 +1,6 @@
 name: df_anymal
 config:
-  _target_: shac.envs.AnymalEnv
+  _target_: shac.envs.anymal.AnymalEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 128
@@ -13,31 +13,31 @@ config:
   nan_state_fix: True
   termination_height: 0.25
   action_penalty: -5e-3
-  up_rew_scale: 0.1
+  up_rew_scale: 10.0
   heading_rew_scale: 1.0
   heigh_rew_scale: 1.0
 
 shac:
   actor_lr: 2e-3
-  critic_lr: 2e-3
-  max_epochs: 5000
-  target_critic_alpha: 0.2
+  critic_lr: 5e-4
+  max_epochs: 3000
+  save_interval: 500
+  target_critic_alpha: 0.99
   actor_mlp:
-    units: [256, 128]
+    units: [400, 200, 100]
   critic_mlp:
-    units: [256, 128]
+    units: [400, 200, 100]
 
 ppo:
   max_epochs: 5000
-  minibatch_size: 16384
-  num_actors: 2048
+  lr: 5e-4
+  minibatch_size: 32768
+  num_actors: 4096
   horizon_length: 32
   save_frequency: 500
   save_best_after: 500
   actor_mlp:
-    units: [256, 128, 64]
-  critic_mlp:
-    units: [256, 128, 64]
+    units: [400, 200, 100]
 
 sac:
   max_epochs: 5000

@@ -3,7 +3,7 @@ config:
   _target_: shac.envs.AntEnv
   render: ${general.render}
   device: ${general.device}
-  num_envs: 512
+  num_envs: 128
   stochastic_init: True
   seed: ${general.seed}
   no_grad: ??? # decided based on algorithm
@@ -13,25 +13,25 @@ config:
 
 shac:
   actor_lr: 2e-3
-  critic_lr: 2e-3
+  critic_lr: 5e-4
   max_epochs: 2000
-  target_critic_alpha: 0.2
+  save_interval: 400
+  target_critic_alpha: 0.99
   actor_mlp:
-    units: [128, 64, 32]
+    units: [400, 200, 100]
   critic_mlp:
-    units: [64, 64]
+    units: [400, 200, 100]
 
 ppo:
-  max_epochs: 5000
+  max_epochs: 50000
+  lr: 5e-4
   minibatch_size: 16384
   num_actors: 2048
   horizon_length: 32
   save_frequency: 500
   save_best_after: 500
   actor_mlp:
-    units: [128, 64, 32]
-  critic_mlp:
-    units: [128, 64, 32]
+    units: [400, 200, 100]
 
 sac:
   max_epochs: 5000

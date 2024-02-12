@@ -17,14 +17,14 @@ config:
 
 shac:
   actor_lr: 2e-3
-  critic_lr: 4e-3
+  critic_lr: 5e-4
   max_epochs: 500
-  betas: [0.7, 0.95]
-  actor_mlp:
-    units: [128, 64, 32]
-  critic_mlp:
-    units: [64, 64]
   save_interval: 100
+  target_critic_alpha: 0.99
+  actor_mlp:
+    units: [400, 200, 100]
+  critic_mlp:
+    units: [400, 200, 100]
 
 ahac:
   actor_lr: 2e-3
@@ -39,16 +39,24 @@ ahac:
   save_interval: 100
 
 ppo:
-  max_epochs: 200
-  minibatch_size: 8192
-  num_actors: 1024
-  horizon_length: 240
+  max_epochs: 500
+  lr: 5e-4
+  minibatch_size: 32768
+  num_actors: 4096
+  horizon_length: 32
   save_frequency: 50
   save_best_after: 50
   actor_mlp:
+    units: [400, 200, 100]
+
+sac:
+  max_epochs: 500
+  batch_size: 2048
+  num_actors: 64
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
     units: [128, 64, 32]
-  critic_mlp:
-    units: [64, 64]
 
 # Note SVG doesn't like floats so we use ints
 svg:
