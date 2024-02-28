@@ -12,13 +12,10 @@ import math
 import inspect
 import typing
 import weakref
-import numpy as np
 import torch
 import torch.utils.cpp_extension
 
 import dflex.config
-
-import copy
 
 # Todo
 # -----
