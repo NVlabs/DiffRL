@@ -338,7 +338,7 @@ class HumanoidEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 0.1 * obs[:, 53]
+        up_reward = 10.0 * obs[:, 53]
         heading_reward = obs[:, 54]
 
         height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)

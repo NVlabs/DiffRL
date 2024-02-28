@@ -211,23 +211,26 @@ class DFlexEnv:
         if torch.any(termination) and self.reset_all:
             truncation = ~termination
 
-        extras = None
+        extras = {
+            "obs_before_reset": self.obs_buf.clone(),
+            "termination": termination,
+            "truncation": truncation,
+        }
         if self.no_grad == False:
-            extras = {
-                "obs_before_reset": self.obs_buf.clone(),
-                "termination": termination,
-                "truncation": truncation,
-                "contact_count": self.state.contact_count.clone().detach(),
-                "contact_forces": self.state.contact_f.clone()
-                .detach()
-                .view(self.num_envs, -1, 6),
-                "body_forces": self.state.body_f_s.clone()
-                .detach()
-                .view(self.num_envs, -1, 6),
-                "accelerations": self.state.body_a_s.clone()
-                .detach()
-                .view(self.num_envs, -1, 6),
-            }
+            extras.update(
+                {
+                    "contact_count": self.state.contact_count.clone().detach(),
+                    "contact_forces": self.state.contact_f.clone()
+                    .detach()
+                    .view(self.num_envs, -1, 6),
+                    "body_forces": self.state.body_f_s.clone()
+                    .detach()
+                    .view(self.num_envs, -1, 6),
+                    "accelerations": self.state.body_a_s.clone()
+                    .detach()
+                    .view(self.num_envs, -1, 6),
+                }
+            )
 
             if self.jacobian and not play:
                 extras.update({"jacobian": jac.cpu().numpy()})
@@ -242,8 +245,8 @@ class DFlexEnv:
 
         return self.obs_buf, rew, done, extras
 
-    def reset(self, env_ids=None, force_reset=None):
-        if env_ids is None:
+    def reset(self, env_ids=None, force_reset=False):
+        if env_ids is None or force_reset:
             # reset all environemnts
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
 
