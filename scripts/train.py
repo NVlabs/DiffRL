@@ -84,11 +84,11 @@ def create_wandb_run(wandb_cfg, job_config, run_id=None):
     try:
         alg_name = job_config["alg"]["_target_"].split(".")[-1]
     except:
-        alg_name = "PPO"
+        alg_name = job_config["alg"]["name"].upper()
     try:
         # Multirun config
         job_id = HydraConfig().get().job.num
-        name = f"{alg_name}_{env_name}_sweep_{job_id}"
+        name = f"{alg_name}_{env_name}_sweep_{job_config['general']['seed']}"
         notes = wandb_cfg.get("notes", None)
     except:
         # Normal (singular) run config
@@ -126,8 +126,8 @@ def train(cfg: DictConfig):
 
     if "_target_" in cfg.alg:
         # Run with hydra
-        if "no_grad" in cfg.env.config:
-            cfg.env.config.no_grad = not cfg.general.train
+        # if "no_grad" in cfg.env.config:
+        cfg.env.config.no_grad = not cfg.general.train
 
         traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 
@@ -139,7 +139,7 @@ def train(cfg: DictConfig):
         else:
             traj_optimizer.run(cfg.env.player.games_num)
 
-    elif cfg.alg.name == "ppo":
+    elif cfg.alg.name == "ppo" or cfg.alg.name == "sac":
         # if not hydra init, then we must have PPO
         # to set up RL games we have to do a bunch of config menipulation
         # which makes it a huge mess...
@@ -173,7 +173,10 @@ def train(cfg: DictConfig):
             yaml.dump(cfg_train, open(os.path.join(logdir, "cfg.yaml"), "w"))
 
         # register envs with the correct number of actors for PPO
-        cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+        if cfg.alg.name == "ppo":
+            cfg["env"]["config"]["num_envs"] = cfg["env"]["ppo"]["num_actors"]
+        else:
+            cfg["env"]["config"]["num_envs"] = cfg["env"]["sac"]["num_actors"]
         register_envs(cfg.env)
 
         # add observer to score keys
