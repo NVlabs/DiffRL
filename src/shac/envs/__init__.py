@@ -6,7 +6,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 from .ant import AntEnv
-from .anymal import AnymalEnv
 from .cartpole_swing_up import CartPoleSwingUpEnv
 from .cheetah import CheetahEnv
 from .dflex_env import DFlexEnv

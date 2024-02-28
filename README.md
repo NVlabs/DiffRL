@@ -102,10 +102,6 @@ python train_shac.py --cfg ./cfg/shac/ant.yaml --checkpoint ./logs/Ant/shac/poli
 
 The `--render` flag indicates whether to export the video of the task execution. If does, the exported video is encoded in `.usd` format, and stored in the `examples/output` folder. To visualize the exported `.usd` file, refer to [USD at NVIDIA](https://developer.nvidia.com/usd).
 
-```python
-python3.8 train.py alg=shac env=humanoid general.render=True general.checkpoint=<policy_path> alg.max_epochs=0 env.config.stochastic_init=False env.player.games_num=1 env.player.num_actors=1 env.config.num_envs=1 alg.eval_runs=1
-```
-
 To install Omniverse, follow the [Omniverse Install Page](https://www.nvidia.com/en-us/omniverse/download/)
 
 - Install [USD Composer](https://www.nvidia.com/en-us/omniverse/apps/create/)

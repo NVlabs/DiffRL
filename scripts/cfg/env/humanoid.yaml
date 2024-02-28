@@ -16,33 +16,20 @@ shac:
   actor_lr: 2e-3
   critic_lr: 5e-4
   max_epochs: 5000
-  target_critic_alpha: 0.99
+  target_critic_alpha: 0.995
   actor_mlp:
-    units: [400, 200, 100]
+    units: [256, 128]
   critic_mlp:
-    units: [400, 200, 100]
+    units: [256, 128]
 
 ppo:
-  max_epochs: 50000
-  lr: 5e-4
-  minibatch_size: 32768
-  num_actors: 4096
+  max_epochs: 5000
+  minibatch_size: 8192
+  num_actors: 1024
   horizon_length: 32
   save_frequency: 500
   save_best_after: 500
   actor_mlp:
-    units: [400, 200, 100]
-
-sac:
-  max_epochs: 5000
-  batch_size: 2048
-  num_actors: 64
-  save_frequency: 500
-  save_best_after: 500
-  actor_critic_mlp:
-    units: [512, 256]
-
-# Note SVG doesn't like floats so we use ints
-svg:
-  num_train_steps: 11000000 # 11M
-  replay_buffer_capacity: 1000000
+    units: [256, 128, 64]
+  critic_mlp:
+    units: [256, 128, 64]

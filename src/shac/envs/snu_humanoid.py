@@ -24,12 +24,6 @@ np.set_printoptions(precision=5, linewidth=256, suppress=True)
 from shac.utils import load_utils as lu
 from shac.utils import torch_utils as tu
 
-# Used for rendering. If not installed, the render function will not work
-try:
-    from pxr import Usd, UsdGeom, Gf
-except ModuleNotFoundError:
-    print("No pxr package. Rendering wil not work!")
-
 
 class SNUHumanoidEnv(DFlexEnv):
     def __init__(
@@ -388,7 +382,7 @@ class SNUHumanoidEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 10.0 * obs[:, 51]
+        up_reward = 0.1 * obs[:, 51]
         heading_reward = obs[:, 52]
 
         height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)
@@ -405,54 +399,3 @@ class SNUHumanoidEnv(DFlexEnv):
         progress_reward = obs[:, 5]
 
         return progress_reward + up_reward + heading_reward + act_penalty
-
-    def render(self, mode = 'human'):
-        """SNU Humanoid requires special rendering as it uses muscles"""
-
-        if self.visualize:
-            with torch.no_grad():
-
-                muscle_start = 0
-                skel_index = 0
-
-                for s in self.skeletons:
-                    for mesh, link in s.mesh_map.items():
-                        
-                        if link != -1:
-                            X_sc = df.transform_expand(self.state.body_X_sc[link].tolist())
-
-                            mesh_path = os.path.join(self.asset_folder, "OBJ/" + mesh + ".usd")
-
-                            self.renderer.add_mesh(mesh, mesh_path, X_sc, 1.0, self.render_time)
-
-                    for m in range(len(s.muscles)):
-
-                        start = self.model.muscle_start[muscle_start + m].item()
-                        end = self.model.muscle_start[muscle_start + m + 1].item()
-
-                        points = []
-
-                        for w in range(start, end):
-                            
-                            link = self.model.muscle_links[w].item()
-                            point = self.model.muscle_points[w].cpu().numpy()
-
-                            X_sc = df.transform_expand(self.state.body_X_sc[link].cpu().tolist())
-
-                            points.append(Gf.Vec3f(df.transform_point(X_sc, point).tolist()))
-                        
-                        self.renderer.add_line_strip(points, name=s.muscles[m].name + str(skel_index), radius=0.0075, color=(self.model.muscle_activation[muscle_start + m]/self.muscle_strengths[m], 0.2, 0.5), time=self.render_time)
-                    
-                    muscle_start += len(s.muscles)
-                    skel_index += 1
-
-            self.render_time += self.dt * self.inv_control_freq
-            self.renderer.update(self.state, self.render_time)
-
-            if (self.num_frames == 1):
-                try:
-                    self.stage.Save()
-                except:
-                    print("USD save error")
-
-                self.num_frames -= 1
