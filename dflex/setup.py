@@ -16,7 +16,7 @@ setuptools.setup(
     long_description="",
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
-    package_data={"": ["*.h", "*.stl", "*.xml", "*.urdf", "*.stl", "*.ojb", "*.usd", "*.dae", "*.jpg"]},
+    package_data={"dflex": ["*.h", "*.stl", "*.xml", "*.urdf", "*.stl", "*.ojb", "*.usd", "*.dae", "*.jpg"]},
     include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",  
