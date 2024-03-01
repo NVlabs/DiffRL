@@ -9,7 +9,7 @@ import math
 import os
 import sys
 import time
-import urdfpy
+import urchin
 
 import torch
 
@@ -161,7 +161,7 @@ class AnymalEnv(DFlexEnv):
         filename = "anymal_c/urdf/anymal_minimal.urdf"
         now = time.time()
         # load URDF here for faster env initialisation when running many paralle envs
-        robot = urdfpy.URDF.load(os.path.join(asset_folder, filename))
+        robot = urchin.URDF.load(os.path.join(asset_folder, filename), lazy_load_meshes=True)
         for i in range(self.num_environments):
             start_pos = (0.0, start_height, 0.0 + self.env_dist * i)
             lu.urdf_load(

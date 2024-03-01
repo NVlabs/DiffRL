@@ -5,7 +5,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import urdfpy
+import urchin
 import math
 import numpy as np
 import os
@@ -20,7 +20,7 @@ def urdf_add_collision(
 ):
     # add geometry
     for collision in collisions:
-        origin = urdfpy.matrix_to_xyz_rpy(collision.origin)
+        origin = urchin.matrix_to_xyz_rpy(collision.origin)
 
         pos = origin[0:3]
         rot = df.rpy2quat(*origin[3:6])
@@ -109,7 +109,7 @@ def urdf_load(
     limit_ke=100.0,
     limit_kd=10.0,
 ):
-    robot = urdfpy.URDF.load(filename)
+    robot = urchin.URDF.load(filename, lazy_load_meshes=True)
 
     # maps from link name -> link index
     link_index = {}
@@ -160,7 +160,7 @@ def urdf_load(
         if joint.parent in link_index:
             parent = link_index[joint.parent]
 
-        origin = urdfpy.matrix_to_xyz_rpy(joint.origin)
+        origin = urchin.matrix_to_xyz_rpy(joint.origin)
 
         pos = origin[0:3]
         rot = df.rpy2quat(*origin[3:6])

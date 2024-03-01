@@ -13,7 +13,7 @@ i = t.item()
 
 print(i)
 
-from urdfpy import URDF
+from urchin import URDF
 
 
 # robot = URDF.load("assets/trifinger/urdf/trifinger_with_stage.urdf")

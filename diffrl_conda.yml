@@ -15,7 +15,7 @@ dependencies:
   - seaborn
   - pip
   - pip:
-      - urdfpy==0.0.22
+      - urchin
       - usd-core
       - hydra-core
       - tqdm
