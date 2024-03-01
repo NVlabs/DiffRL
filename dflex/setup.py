@@ -16,10 +16,10 @@ setuptools.setup(
     long_description="",
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
-    package_data={"": ["*.h", "dflex/envs/assets/*"]},
+    package_data={"": ["*.h", "*.stl", "*.xml", "*.urdf", "*.stl", "*.ojb", "*.usd", "*.dae", "*.jpg"]},
     include_package_data=True,
     classifiers=[
-        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3",  
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.9",
