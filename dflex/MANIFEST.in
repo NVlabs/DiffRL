@@ -1,4 +1,4 @@
-include *.h
+include dflex/*.h
 include dflex/envs/assets
 include dflex/envs/assets/*.xml
 include dflex/envs/assets/*.urdf

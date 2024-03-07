@@ -72,6 +72,7 @@ class DFlexEnv:
         self.jacobians = []
 
         self.episode_length = episode_length
+        self.max_episode_steps = episode_length
 
         self.device = device
 
@@ -378,6 +379,9 @@ class DFlexEnv:
         checkpoint["progress_buf"] = self.progress_buf.clone()
 
         return checkpoint
+    
+    def rand_act(self):
+        return torch.rand((self.num_envs, self.num_actions), device=self.device)*2.0 - 1.0
 
     def get_number_of_agents(self):
         return self.num_agents
