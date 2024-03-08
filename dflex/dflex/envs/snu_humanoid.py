@@ -37,7 +37,6 @@ class SNUHumanoidEnv(DFlexEnv):
         render=False,
         device="cuda:0",
         num_envs=4096,
-        seed=0,
         episode_length=1000,
         no_grad=True,
         stochastic_init=False,
@@ -49,7 +48,6 @@ class SNUHumanoidEnv(DFlexEnv):
         logdir=None,
         nan_state_fix=True,  # humanoid env needs this
         jacobian_norm=None,
-        reset_all=False,
     ):
         self.filter = {
             "Pelvis",
@@ -96,12 +94,10 @@ class SNUHumanoidEnv(DFlexEnv):
             num_act,
             episode_length,
             MM_caching_frequency,
-            seed,
             no_grad,
             render,
             nan_state_fix,
             jacobian_norm,
-            reset_all,
             stochastic_init,
             jacobian,
             device,
