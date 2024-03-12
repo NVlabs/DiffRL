@@ -370,7 +370,11 @@ class HumanoidEnv(DFlexEnv):
             height_reward = self.height_rew_scale * (-torch.exp(-error))
         elif self.height_rew_type == "log-barrier":
             error = obs[:, 0] - self.termination_height
-            error = torch.clip(error, -1.0)
+            error = torch.clip(error, -1.0,)
+            height_reward = self.height_rew_scale * torch.log(error+1)
+        elif self.height_rew_type == "log-barrier-clip":
+            error = obs[:, 0] - self.termination_height
+            error = torch.clip(error, -1.0, self.termination_tolerance)
             height_reward = self.height_rew_scale * torch.log(error+1)
         else:
             raise NotImplemented
