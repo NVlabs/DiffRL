@@ -295,6 +295,7 @@ class AntEnv(DFlexEnv):
         height_reward = obs[:, 0] - self.termination_height
 
         progress_reward = obs[:, 5]
+        self.primal = progress_reward.detach()
         act_penalty = torch.sum(act**2, dim=-1) * self.action_penalty
 
         return (

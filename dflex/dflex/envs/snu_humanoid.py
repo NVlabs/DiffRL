@@ -406,6 +406,7 @@ class SNUHumanoidEnv(DFlexEnv):
         act_penalty = torch.sum(torch.abs(act), dim=-1) * self.action_penalty
 
         progress_reward = obs[:, 5]
+        self.primal = progress_reward.detach()
 
         return progress_reward + up_reward + heading_reward + act_penalty
 

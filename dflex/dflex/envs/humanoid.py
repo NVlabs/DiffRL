@@ -48,6 +48,7 @@ class HumanoidEnv(DFlexEnv):
         height_rew_scale=10.0,
         up_rew_scale=0.1,
         heading_rew_scale=1.0,
+        height_rew_type="xu"
     ):
         num_obs = 76
         num_act = 21
@@ -114,6 +115,7 @@ class HumanoidEnv(DFlexEnv):
         self.height_rew_scale = height_rew_scale
         self.up_rew_scale = up_rew_scale
         self.heading_rew_scale = heading_rew_scale
+        self.height_rew_type = height_rew_type
 
         self.setup_visualizer(logdir)
 
@@ -340,21 +342,41 @@ class HumanoidEnv(DFlexEnv):
             ],
             dim=-1,
         )
-
+    
+    def xu_func(self, x, term, tol, pos_scale, neg_scale):
+        x = x - term - tol
+        x = torch.clip(x, -1.0, tol)
+        x = torch.where(x < 0.0, neg_scale * x * x, x)
+        x = torch.where(x >= 0.0, pos_scale * x, x)
+        return x
+    
     def calculate_reward(self, obs, act):
         up_reward = self.up_rew_scale * obs[:, 53]
         heading_reward = self.heading_rew_scale * obs[:, 54]
 
-        height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)
-        height_reward = torch.clip(height_diff, -1.0, self.termination_tolerance)
-        height_reward = torch.where(
-            height_reward < 0.0, -200.0 * height_reward * height_reward, height_reward
-        )
-        height_reward = torch.where(
-            height_reward > 0.0, self.height_rew_scale * height_reward, height_reward
-        )
+        if self.height_rew_type == "xu":
+            height_reward = self.xu_func(
+                obs[:, 0],
+                self.termination_height,
+                self.termination_tolerance,
+                self.height_rew_scale,
+                -200.0,
+            )
+        elif self.height_rew_type == "linear":
+            error = obs[:, 0] - self.termination_height
+            height_reward = self.heading_rew_scale * error
+        elif self.height_rew_type == "exponent":
+            error = obs[:, 0] - self.termination_height
+            height_reward = self.height_rew_scale * (-torch.exp(-error))
+        elif self.height_rew_type == "log-barrier":
+            error = obs[:, 0] - self.termination_height
+            error = torch.clip(error, -1.0)
+            height_reward = self.height_rew_scale * torch.log(error+1)
+        else:
+            raise NotImplemented
 
         progress_reward = obs[:, 5]
+        self.primal = progress_reward.detach()
         act_penalty = torch.sum(act**2, dim=-1) * self.action_penalty
 
         return (

@@ -261,6 +261,7 @@ class HopperEnv(DFlexEnv):
         angle_reward = self.angle_rew_scale * (-obs[:, 1] ** 2 / (self.termination_angle**2) + 1.0)
 
         progress_reward = obs[:, 5]
+        self.primal = progress_reward.detach()
         act_penalty = torch.sum(act**2, dim=-1) * self.action_penalty
 
         return progress_reward + height_reward + angle_reward + act_penalty

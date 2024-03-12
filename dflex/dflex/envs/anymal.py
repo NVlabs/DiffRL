@@ -329,6 +329,7 @@ class AnymalEnv(DFlexEnv):
         heading_rew = self.heading_rew_scale * obs[:, 36]
         height_rew = self.heigh_rew_scale * (obs[:, 0] - self.termination_height)
         progress_rew = obs[:, 5]  # forward velocity
+        self.primal = progress_rew.detach()
         act_penalty = self.action_penalty * torch.sum(act**2, dim=-1)
 
         return progress_rew + up_rew + heading_rew + height_rew + act_penalty

@@ -231,6 +231,9 @@ class DFlexEnv:
             "termination": termination,
             "truncation": truncation,
         }
+        if hasattr(self, "primal"):
+            extras.update({"primal": self.primal})
+            
         if self.no_grad == False:
             extras.update(
                 {
