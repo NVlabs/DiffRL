@@ -48,6 +48,13 @@ class SNUHumanoidEnv(DFlexEnv):
         logdir=None,
         nan_state_fix=True,  # humanoid env needs this
         jacobian_norm=None,
+        termination_height=0.46,
+        termination_tolerance=0.05,
+        height_rew_scale=4.0,
+        up_rew_scale=0.1,
+        heading_rew_scale=1.0,
+        action_penalty=-1e-3,
+        joint_vel_obs_scaling=0.1,
     ):
         self.filter = {
             "Pelvis",
@@ -110,14 +117,14 @@ class SNUHumanoidEnv(DFlexEnv):
         self.init_sim()
 
         # other parameters
-        self.termination_height = 0.46
-        self.termination_tolerance = 0.05
-        self.height_rew_scale = 4.0
+        self.termination_height = termination_height
+        self.termination_tolerance = termination_tolerance
+        self.height_rew_scale = height_rew_scale
+        self.up_rew_scale = up_rew_scale
+        self.heading_rew_scale = heading_rew_scale
         self.action_strength = 100.0
-        self.action_penalty = -0.001
-        self.joint_vel_obs_scaling = 0.1
-        # self.motor_scale = 0.5
-        # self.motor_strengths = 0.5
+        self.action_penalty = action_penalty
+        self.joint_vel_obs_scaling = joint_vel_obs_scaling
 
         self.setup_visualizer(logdir)
 
@@ -384,8 +391,8 @@ class SNUHumanoidEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 10.0 * obs[:, 51]
-        heading_reward = obs[:, 52]
+        up_reward = self.up_rew_scale * obs[:, 51]
+        heading_reward = self.heading_rew_scale * obs[:, 52]
 
         height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)
         height_reward = torch.clip(height_diff, -1.0, self.termination_tolerance)

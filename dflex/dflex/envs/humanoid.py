@@ -41,6 +41,13 @@ class HumanoidEnv(DFlexEnv):
         logdir=None,
         nan_state_fix=True,  # humanoid env needs this
         jacobian_norm=None,
+        termination_height=0.74,
+        action_penalty=-0.002,
+        joint_vel_obs_scaling=0.1,
+        termination_tolerance=0.1,
+        height_rew_scale=10.0,
+        up_rew_scale=0.1,
+        heading_rew_scale=1.0,
     ):
         num_obs = 76
         num_act = 21
@@ -67,7 +74,7 @@ class HumanoidEnv(DFlexEnv):
         self.init_sim()
 
         # other parameters
-        self.termination_height = 0.74
+        self.termination_height = termination_height
         self.motor_strengths = [
             200,
             200,
@@ -101,10 +108,12 @@ class HumanoidEnv(DFlexEnv):
             requires_grad=False,
         ).repeat((self.num_envs, 1))
 
-        self.action_penalty = -0.002
-        self.joint_vel_obs_scaling = 0.1
-        self.termination_tolerance = 0.1
-        self.height_rew_scale = 10.0
+        self.action_penalty = action_penalty
+        self.joint_vel_obs_scaling = joint_vel_obs_scaling
+        self.termination_tolerance = termination_tolerance
+        self.height_rew_scale = height_rew_scale
+        self.up_rew_scale = up_rew_scale
+        self.heading_rew_scale = heading_rew_scale
 
         self.setup_visualizer(logdir)
 
@@ -333,8 +342,8 @@ class HumanoidEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 10.0 * obs[:, 53]
-        heading_reward = obs[:, 54]
+        up_reward = self.up_rew_scale * obs[:, 53]
+        heading_reward = self.heading_rew_scale * obs[:, 54]
 
         height_diff = obs[:, 0] - (self.termination_height + self.termination_tolerance)
         height_reward = torch.clip(height_diff, -1.0, self.termination_tolerance)

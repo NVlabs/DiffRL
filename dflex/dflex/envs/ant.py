@@ -43,6 +43,10 @@ class AntEnv(DFlexEnv):
         logdir=None,
         nan_state_fix=False,
         jacobian_norm=None,
+        termination_height=0.27,
+        action_penalty=0.0,
+        joint_vel_obs_scaling=0.1,
+        up_rew_scale=0.1,
     ):
         num_obs = 37
         num_act = 8
@@ -69,10 +73,11 @@ class AntEnv(DFlexEnv):
         self.init_sim()
 
         # other parameters
-        self.termination_height = 0.27
+        self.termination_height = termination_height
+        self.action_penalty = action_penalty
+        self.joint_vel_obs_scaling = joint_vel_obs_scaling
+        self.up_rew_scale =up_rew_scale
         self.action_strength = 200.0
-        self.action_penalty = 0.0
-        self.joint_vel_obs_scaling = 0.1
 
         self.setup_visualizer(logdir)
 
@@ -285,7 +290,7 @@ class AntEnv(DFlexEnv):
         )
 
     def calculate_reward(self, obs, act):
-        up_reward = 0.1 * obs[:, 27]
+        up_reward = self.up_rew_scale * obs[:, 27]
         heading_reward = obs[:, 28]
         height_reward = obs[:, 0] - self.termination_height
 

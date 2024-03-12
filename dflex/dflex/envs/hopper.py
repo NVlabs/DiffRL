@@ -42,6 +42,13 @@ class HopperEnv(DFlexEnv):
         logdir=None,
         nan_state_fix=False,
         jacobian_norm=None,
+        termination_height=-0.45,
+        termination_angle=np.pi / 6.0,
+        termination_height_tolerance=0.15,
+        termination_angle_tolerance=0.05,
+        height_rew_scale=1.0,
+        angle_rew_scale=1.0,
+        action_penalty=-1e-1,
     ):
         num_obs = 11
         num_act = 3
@@ -68,13 +75,14 @@ class HopperEnv(DFlexEnv):
         self.init_sim()
 
         # other parameters
-        self.termination_height = -0.45
-        self.termination_angle = np.pi / 6.0
-        self.termination_height_tolerance = 0.15
-        self.termination_angle_tolerance = 0.05
-        self.height_rew_scale = 1.0
+        self.termination_height = termination_height
+        self.termination_angle = termination_angle
+        self.termination_height_tolerance = termination_height_tolerance
+        self.termination_angle_tolerance = termination_angle_tolerance
+        self.height_rew_scale = height_rew_scale
+        self.angle_rew_scale = angle_rew_scale
+        self.action_penalty = action_penalty
         self.action_strength = 200.0
-        self.action_penalty = -1e-1
 
         # TODO logdir shouldn't need to be passed in here
         self.setup_visualizer(logdir)
@@ -250,7 +258,7 @@ class HopperEnv(DFlexEnv):
             height_reward > 0.0, self.height_rew_scale * height_reward, height_reward
         )
 
-        angle_reward = 1.0 * (-obs[:, 1] ** 2 / (self.termination_angle**2) + 1.0)
+        angle_reward = self.angle_rew_scale * (-obs[:, 1] ** 2 / (self.termination_angle**2) + 1.0)
 
         progress_reward = obs[:, 5]
         act_penalty = torch.sum(act**2, dim=-1) * self.action_penalty

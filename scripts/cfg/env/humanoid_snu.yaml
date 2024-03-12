@@ -8,9 +8,15 @@ config:
   num_envs: 64
   no_grad: ??? # decided based on algorithm
   stochastic_init: True
-  seed: ${general.seed}
   episode_length: 1000
   MM_caching_frequency: 8
+  termination_height: 0.46
+  termination_tolerance: 0.05
+  height_rew_scale: 4.0
+  up_rew_scale: 0.1 # 10 produces better looking behaviour
+  heading_rew_scale: 1.0
+  action_penalty: -1e-3
+  joint_vel_obs_scaling: 0.1
 
 shac:
   actor_lr: 2e-3

@@ -5,7 +5,6 @@ config:
   device: ${general.device}
   num_envs: 128
   stochastic_init: True
-  seed: ${general.seed}
   no_grad: ??? # decided based on algorithm
   episode_length: 1000
   MM_caching_frequency: 16
@@ -13,7 +12,7 @@ config:
   nan_state_fix: True
   termination_height: 0.25
   action_penalty: -5e-3
-  up_rew_scale: 10.0
+  up_rew_scale: 0.1
   heading_rew_scale: 1.0
   heigh_rew_scale: 1.0
 

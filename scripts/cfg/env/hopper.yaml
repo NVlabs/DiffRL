@@ -6,14 +6,18 @@ config:
   render: ${general.render}
   device: ${general.device}
   num_envs: 1024
-  seed: ${general.seed}
   episode_length: 1000
   no_grad: ??? # decided based on algorithm
   stochastic_init: True
   MM_caching_frequency: 4
   early_termination: True
-  contact_ke: 2e4
-  contact_kd:
+  termination_height: -0.45
+  termination_angle: 0.524 # pi/6
+  termination_height_tolerance: 0.15
+  termination_angle_tolerance: 0.05
+  height_rew_scale: 1.0
+  action_penalty: -1e-1
+
 
 shac:
   actor_lr: 2e-3
