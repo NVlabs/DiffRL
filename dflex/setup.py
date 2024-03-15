@@ -15,12 +15,12 @@ setuptools.setup(
     description="Differentiable Multiphysics for Python",
     long_description="",
     long_description_content_type="text/markdown",
-    #    url="https://github.com/pypa/sampleproject",
     packages=setuptools.find_packages(),
-    package_data={"": ["*.h"]},
+    include_package_data=True,
     classifiers=[
-        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3",  
         "Operating System :: OS Independent",
     ],
-    install_requires=["ninja", "torch"],
+    python_requires=">=3.9",
+    install_requires=["ninja", "torch", "numpy", "urchin", "usd-core"],
 )

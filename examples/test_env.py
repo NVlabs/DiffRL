@@ -6,7 +6,9 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import sys, os
-project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+import numpy as np
+
+project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_dir)
 
 import time
@@ -14,51 +16,69 @@ import time
 import torch
 import random
 
-import envs
-from utils.common import *
+from shac import envs
+from shac.utils.common import seeding
 
 import argparse
 
-def set_seed(seed):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--env', type = str, default = 'AntEnv')
-parser.add_argument('--num-envs', type = int, default = 64)
-parser.add_argument('--render', default = False, action = 'store_true')
+def main(args):
+    seeding()
 
-args = parser.parse_args()
+    env_fn = getattr(envs, args.env)
 
-seeding()
+    env_fn_kwargs = dict(
+        num_envs=args.num_envs,
+        device="cuda",
+        render=args.render,
+        seed=0,
+        stochastic_init=False,
+        no_grad=True,
+    )
+    if issubclass(env_fn, envs.DFlexEnv):
+        env_fn_kwargs["MM_caching_frequency"] = 1
 
-env_fn = getattr(envs, args.env)
+    env = env_fn(**env_fn_kwargs)
+    # sets seed
+    torch.manual_seed(123)
 
-env = env_fn(num_envs = args.num_envs, \
-            device = 'cuda:0', \
-            render = args.render, \
-            seed = 0, \
-            stochastic_init = True, \
-            MM_caching_frequency = 16, \
-            no_grad = True)
+    obs = env.reset()
+    print(obs[:1])
 
-obs = env.reset()
+    num_actions = env.num_actions
 
-num_actions = env.num_actions
+    t_start = time.time()
 
-t_start = time.time()
+    reward_episode = 0.0
+    observations = np.load("data/observations.npy")
+    # acts = np.load('data/acts.npy')
+    for i in range(1000):
+        actions = torch.rand((args.num_envs, num_actions), device="cuda")
+        # act = actions.cpu().numpy()
+        # assert np.isclose(acts[i], act).all(), f"expected {acts[i]} got {act}"
+        obs, reward, done, info = env.step(actions)
+        # assert obs.requires_grad, "obs should require grad"
+        o = obs[:1].detach().cpu().numpy()
+        # assert np.isclose(o, observations[i]).all(), f"expected {observations[i]} got {o}"
+        # observations.append(obs[:1].detach().cpu().numpy())
+        if i % 40 == 0:
+            print(obs[:1])
+        reward_episode += reward
 
-reward_episode = 0.
-for i in range(1000):
-    actions = torch.randn((args.num_envs, num_actions), device = 'cuda:0')
-    obs, reward, done, info = env.step(actions)
-    reward_episode += reward
+    t_end = time.time()
+    # np.save('data/observations.npy', np.stack(observations))
 
-t_end = time.time()
+    print("fps = ", 1000 * args.num_envs / (t_end - t_start))
+    print("mean reward = ", reward_episode.mean().detach().cpu().item())
 
-print('fps = ', 1000 * args.num_envs / (t_end - t_start))
-print('mean reward = ', reward_episode.mean().detach().cpu().item())
+    print("Finish Successfully")
 
-print('Finish Successfully')
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", type=str, default="CartPoleSwingUpWarpEnv")
+    parser.add_argument("--num-envs", type=int, default=64)
+    parser.add_argument("--render", default=False, action="store_true")
+
+    args = parser.parse_args()
+    main(args)

@@ -1,0 +1,12 @@
+name: mpc
+config:
+  planner:
+    _target_: shac.algorithms.mpc.Planner
+    noise: 0.1
+  policy:
+    _target_: shac.algorithms.mpc.Policy
+    num_actions: ${env.num_actions}
+    horizon: 0.25
+    dt: 0.01666667
+    max_steps: ${env.config.episode_length}    
+    policy_type: "zero"

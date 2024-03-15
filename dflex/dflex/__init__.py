@@ -8,6 +8,7 @@
 from dflex.sim import *
 from dflex.render import *
 from dflex.adjoint import compile
+from dflex import envs
 
 from dflex.util import *
 

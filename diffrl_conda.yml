@@ -2,13 +2,26 @@ name: shac
 channels:
   - pytorch
   - defaults
+  - nvidia/label/cuda-11.8.0
 dependencies:
-  - python=3.8.13=h12debd9_0
-  - pytorch=1.11.0=py3.8_cuda11.3_cudnn8.2.0_0
-  - torchvision=0.12.0=py38_cu113
+  - python=3.8
+  - pytorch-cuda=11.8
+  - pytorch==1.13.*
+  - cuda=11.8
+  - cuda-toolkit=11.8
+  - numpy==1.23.*
+  - pandas
+  - matplotlib
+  - seaborn
+  - pip
   - pip:
-    - pyyaml==6.0
-    - tensorboard==2.8.0
-    - tensorboardx==2.5
-    - urdfpy==0.0.22
-    - usd-core==22.3
+      - urchin
+      - usd-core
+      - hydra-core
+      - tqdm
+      - wandb
+      - torchopt
+      - black
+      - tensorboardX
+      - rl_games==1.5.*
+      - torchviz

@@ -1,0 +1,13 @@
+name: df_double_pendulum
+
+config:
+  _target_: shac.envs.DoublePendulumEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: ${resolve_default:1024,${general.num_envs}}
+  seed: ${general.seed}
+  episode_length: 200
+  no_grad: False
+  stochastic_init: False
+  MM_caching_frequency: 4
+  early_termination: False

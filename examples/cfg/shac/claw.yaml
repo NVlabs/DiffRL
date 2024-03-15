@@ -1,0 +1,47 @@
+params:
+  diff_env:
+    name: ClawWarpEnv
+    stochastic_env: True
+    episode_length: 500
+    MM_caching_frequency: 16
+    goal_type: 1 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
+    action_type: 1 # 0: position, 1: torque
+
+  network:
+    actor: ActorStochasticMLP # ActorDeterministicMLP
+    actor_mlp:
+      units: [128, 64, 32]
+      activation: elu
+
+    critic: CriticMLP
+    critic_mlp:
+      units: [64, 64]
+      activation: elu
+
+  config:
+    name: warp_claw_shac
+    actor_learning_rate: 2e-3 # adam
+    critic_learning_rate: 2e-3 # adam
+    lr_schedule: linear # ['constant', 'linear']
+    target_critic_alpha: 0.2
+    obs_rms: True
+    ret_rms: False
+    critic_iterations: 16
+    critic_method: td-lambda # ['td-lambda', 'one-step']
+    lambda: 0.95
+    num_batch: 4
+    gamma: 0.99
+    betas: [0.7, 0.95] # adam
+    max_epochs: 2000
+    steps_num: 25
+    grad_norm: 1.0
+    truncate_grads: True
+    num_actors: 32
+    save_interval: 400
+    score_keys: ["control_pen", "ftip_err", "q_err", "pos_err", "force_err"]
+
+    player:
+      determenistic: True
+      games_num: 1
+      num_actors: 1
+      print_stats: True

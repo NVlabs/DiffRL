@@ -1,0 +1,30 @@
+defaults:
+  - _self_
+  - env: cartpole
+  - alg: shac
+
+# mostly used for logging and naming experiments
+exp_name: shac_benchmarks
+
+general:
+  train: True # if False, we're in eval mode
+  logdir: logs
+  render: False
+  device: cuda:0
+  run_wandb: False
+  seed: 42
+  checkpoint:
+  multi_gpu: False # for PPO
+  mixed_precision: False # for PPO
+
+# env-specific defaults for different algs
+env:
+  gamma: 0.99
+  player:
+    games_num: 12
+    num_actors: 4
+
+wandb:
+  project: shac
+  entity: dmanip-rss
+  group: ${exp_name}

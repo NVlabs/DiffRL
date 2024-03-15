@@ -1,0 +1,30 @@
+_target_: shac.algorithms.shac.SHAC
+_recursive_: False
+actor_config:
+  _target_: shac.models.actor.ActorStochasticMLP
+  units: ${resolve_child:[64,64],${env.shac.actor_mlp},units}
+  activation: elu
+critic_config:
+  _target_: shac.models.critic.CriticMLP
+  units: ${resolve_child:[64,64],${env.shac.critic_mlp},units}
+  activation: elu
+actor_lr: ${resolve_child:2e-3,${env.shac},actor_lr}
+critic_lr: ${resolve_child:2e-3,${env.shac},critic_lr}
+lr_schedule: linear
+target_critic_alpha: ${resolve_child:0.2,${env.shac},target_critic_alpha}
+obs_rms: True
+ret_rms: False
+critic_iterations: 16
+critic_batches: 4
+critic_method: td-lambda # ('td-lambda', 'one-step')
+lam: 0.95
+gamma: 0.99
+max_epochs: ${resolve_child:2000,${env.shac},max_epochs}
+steps_num: 32
+grad_norm: 1.0
+critic_grad_norm: 1.0
+save_interval: ${resolve_child:400,${env.shac},save_interval}
+stochastic_eval: False
+eval_runs: 12
+train: ${general.train}
+device: ${general.device}

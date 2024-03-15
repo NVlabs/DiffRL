@@ -1,0 +1,47 @@
+name: warp_hopper
+
+config:
+  _target_: shac.envs.HopperWarpEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 512
+  seed: ${general.seed}
+  episode_length: 1000
+  no_grad: ??? # decided based on algorithm
+  stochastic_init: False
+    
+shac:
+  actor_lr: 2e-3
+  critic_lr: 4e-3
+  max_epochs: 500
+  betas: [0.7, 0.95]
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+  save_interval: 400
+
+shac2:
+  actor_lr: 2e-3
+  critic_lr: 4e-3
+  max_epochs: 500
+  betas: [0.7, 0.95]
+  actor_mlp:
+    units: [128, 128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+  save_interval: 400
+
+ppo:
+  max_epochs: 200
+  minibatch_size: 8192
+  num_actors: 1024
+  steps_num: 240
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+
+player:
+  games_num: 12
+  num_actors: 4

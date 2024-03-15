@@ -47,6 +47,11 @@ In this paper, we present a GPU-based differentiable simulation and propose a po
   pip install protobuf==3.20.0
   ````
 
+
+### Hack to enable building inside the conda environment
+
+ln -s $CONDA_PREFIX/lib $CONDA_PREFIX/lib64
+
 #### Test Examples
 
 A test example can be found in the `examples` folder.
@@ -97,14 +102,18 @@ python train_shac.py --cfg ./cfg/shac/ant.yaml --checkpoint ./logs/Ant/shac/poli
 
 The `--render` flag indicates whether to export the video of the task execution. If does, the exported video is encoded in `.usd` format, and stored in the `examples/output` folder. To visualize the exported `.usd` file, refer to [USD at NVIDIA](https://developer.nvidia.com/usd).
 
-## Citation
-
-If you find our paper or code is useful, please consider citing:
-```kvk
-  @inproceedings{xu2021accelerated,
-    title={Accelerated Policy Learning with Parallel Differentiable Simulation},
-    author={Xu, Jie and Makoviychuk, Viktor and Narang, Yashraj and Ramos, Fabio and Matusik, Wojciech and Garg, Animesh and Macklin, Miles},
-    booktitle={International Conference on Learning Representations},
-    year={2021}
-  }
+```python
+python3.8 train.py alg=shac env=humanoid general.render=True general.checkpoint=<policy_path> alg.max_epochs=0 env.config.stochastic_init=False env.player.games_num=1 env.player.num_actors=1 env.config.num_envs=1 alg.eval_runs=1
 ```
+
+To install Omniverse, follow the [Omniverse Install Page](https://www.nvidia.com/en-us/omniverse/download/)
+
+- Install [USD Composer](https://www.nvidia.com/en-us/omniverse/apps/create/)
+- Run Create using:
+```$ MESA_GL_VERSION_OVERRIDE=4.6 {OMNI_CREATE_PATH}/omni.create.singlegpu.sh``` where the `OMNI_CREATE_PATH` is `~/.local/share/ov/pkg/create-2022.2.2` updated to your version
+
+
+## Debugging
+
+If you're getting missing cuda libs while building dflex kernels, then do `ln -s $CONDA_PREFIX/lib $CONDA_PREFIX/lib64`
+ 

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import time
 from torch.optim.optimizer import Optimizer
 
 numpy_to_torch_dtype_dict = {
