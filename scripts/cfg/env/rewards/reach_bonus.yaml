@@ -1,8 +1,0 @@
-reach_bonus:
-  reward_fn_partial: 
-    _partial_: true
-    _target_: dmanip.utils.rewards.reach_bonus
-  args: 
-    - object_pose_err
-    - reach_threshold
-  scale: 250.0
