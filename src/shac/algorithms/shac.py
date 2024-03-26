@@ -317,7 +317,7 @@ class SHAC:
 
             # sanity check
             if (~torch.isfinite(real_obs)).sum() > 0:
-                print("Got inf obs")
+                print_error("Got inf obs")
                 # raise ValueError # it's ok to have this for humanoid
 
             if self.obs_rms is not None:
@@ -333,7 +333,7 @@ class SHAC:
 
             # sanity check
             if (next_values > 1e6).sum() > 0 or (next_values < -1e6).sum() > 0:
-                print("next value error")
+                print_error("next value error")
                 raise ValueError
 
             rew_acc[i + 1, :] = rew_acc[i, :] + gamma * rew
@@ -397,7 +397,7 @@ class SHAC:
                         )
                     for id in done_env_ids:
                         if self.episode_loss[id] > 1e6 or self.episode_loss[id] < -1e6:
-                            print("ep loss error")
+                            print_error("ep loss error")
                             raise ValueError
 
                         self.episode_loss_his.append(self.episode_loss[id].item())
@@ -610,7 +610,7 @@ class SHAC:
                     torch.isnan(self.grad_norm_before_clip)
                     or self.grad_norm_before_clip > 1e6
                 ):
-                    print("ERROR: NaN gradient")
+                    print_error("NaN gradient")
                     raise ValueError
 
             self.time_report.end_timer("compute actor loss")
@@ -813,7 +813,7 @@ class SHAC:
         )
 
     def load(self, path):
-        print("Loading policy from", path)
+        print_info("Loading policy from", path)
         checkpoint = torch.load(path)
         self.actor = checkpoint[0].to(self.device)
         self.critic = checkpoint[1].to(self.device)
