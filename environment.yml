@@ -1,15 +1,13 @@
-name: shac
+name: diffrl
 channels:
   - pytorch
   - defaults
-  - nvidia/label/cuda-11.8.0
+  - nvidia
 dependencies:
-  - python=3.8
-  - pytorch-cuda=11.8
-  - pytorch==1.13.*
-  - cuda=11.8
-  - cuda-toolkit=11.8
-  - numpy==1.23.*
+  - python=3.10
+  - pytorch==1.13.1
+  - pytorch-cuda=11.7
+  - cuda-toolkit=11.7
   - pandas
   - matplotlib
   - seaborn
@@ -24,4 +22,3 @@ dependencies:
       - black
       - tensorboardX
       - rl_games==1.5.*
-      - torchviz
