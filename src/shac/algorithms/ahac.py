@@ -229,10 +229,6 @@ class AHAC:
             for key in self.score_keys
         }
 
-        # temporary load policy
-        # path = "/home/ignat/git/SHAC/scripts/multirun/2023-08-24/18-43-28/14/logs/best_policy.pt"
-        # self.load(path, actor=False)
-
         # timer
         self.time_report = TimeReport()
 

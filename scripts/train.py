@@ -1,24 +1,28 @@
-import traceback
 import hydra, os, wandb, yaml
+from IPython.core import ultratb
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
 from shac.utils import hydra_utils
 from hydra.utils import instantiate
-from shac.algorithms.shac import SHAC
-from shac.algorithms.shac2 import SHAC as SHAC2
-from shac.algorithms.ahac import AHAC
 from shac.utils.common import *
 from shac.utils.rlgames_utils import (
     RLGPUEnvAlgoObserver,
     RLGPUEnv,
-    parse_diff_env_kwargs,
 )
-from shac import envs
 from gym import wrappers
 from rl_games.torch_runner import Runner
 from rl_games.common import env_configurations, vecenv
-from svg.train import Workspace
 from omegaconf import OmegaConf, open_dict
+
+try:
+    from svg.train import Workspace
+except:
+    print_warning("SVG not installed")
+
+# enables ipdb when script crashes
+sys.excepthook = ultratb.FormattedTB(mode="Plain", color_scheme="Neutral", call_pdb=1)
+
+
 
 
 def register_envs(env_config):
@@ -45,7 +49,7 @@ def register_envs(env_config):
         print("num_obs = ", env.num_obs)
 
         frames = kwargs.pop("frames", 1)
-        if frames > 1:
+        if frames > 1: 
             env = wrappers.FrameStack(env, frames, False)
 
         return env
@@ -124,20 +128,20 @@ def train(cfg: DictConfig):
     logdir = HydraConfig.get()["runtime"]["output_dir"]
     logdir = os.path.join(logdir, cfg.general.logdir)
 
+    seeding(cfg.general.seed)
+
     if "_target_" in cfg.alg:
-        # Run with hydra
-        # if "no_grad" in cfg.env.config:
         cfg.env.config.no_grad = not cfg.general.train
 
-        traj_optimizer = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
+        algo = instantiate(cfg.alg, env_config=cfg.env.config, logdir=logdir)
 
         if cfg.general.checkpoint:
-            traj_optimizer.load(cfg.general.checkpoint)
+            algo.load(cfg.general.checkpoint)
 
         if cfg.general.train:
-            traj_optimizer.train()
+            algo.train()
         else:
-            traj_optimizer.run(cfg.env.player.games_num)
+            algo.run(cfg.env.player.games_num)
 
     elif cfg.alg.name == "ppo" or cfg.alg.name == "sac":
         # if not hydra init, then we must have PPO
