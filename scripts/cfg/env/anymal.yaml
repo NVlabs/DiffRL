@@ -1,6 +1,6 @@
 name: df_anymal
 config:
-  _target_: shac.envs.anymal.AnymalEnv
+  _target_: dflex.envs.AnymalEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 128

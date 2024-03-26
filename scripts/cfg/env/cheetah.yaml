@@ -1,7 +1,7 @@
 name: df_cheetah
 
 config:
-  _target_: shac.envs.CheetahEnv
+  _target_: dflex.envs.CheetahEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 1024

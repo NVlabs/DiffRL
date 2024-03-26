@@ -2,7 +2,7 @@ name: df_hopper
 env_name: HopperEnv
 
 config:
-  _target_: shac.envs.HopperEnv
+  _target_: dflex.envs.HopperEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 1024

@@ -2,7 +2,7 @@ name: df_cartpole_swing_up
 env_name: CartPoleSwingUpEnv
 
 config:
-  _target_: shac.envs.CartPoleSwingUpEnv
+  _target_: dflex.envs.CartPoleSwingUpEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 1024

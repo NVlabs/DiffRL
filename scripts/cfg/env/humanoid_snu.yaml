@@ -2,7 +2,7 @@ name: df_snuhumanoid
 env_name: SNUHumanoidEnv
 
 config:
-  _target_: shac.envs.SNUHumanoidEnv
+  _target_: dflex.envs.SNUHumanoidEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 64

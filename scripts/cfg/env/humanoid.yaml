@@ -2,7 +2,7 @@ name: df_humanoid
 env_name: HumanoidEnv
 
 config:
-  _target_: shac.envs.HumanoidEnv
+  _target_: dflex.envs.HumanoidEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 64

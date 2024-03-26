@@ -1,6 +1,6 @@
 name: df_ant
 config:
-  _target_: shac.envs.AntEnv
+  _target_: dflex.envs.AntEnv
   render: ${general.render}
   device: ${general.device}
   num_envs: 128
