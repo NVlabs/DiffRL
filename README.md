@@ -1,4 +1,4 @@
-# SHAC
+# Adaptive Horizon Actor Critic (AHAC)
 
 This repository contains the implementation for the paper [Adaptive Horizon Actor-Critic for Policy Learning in Contact-Rich Differentiable Simulation](https://adaptive-horizon-actor-critic.github.io/) (ICML 2024).
 
