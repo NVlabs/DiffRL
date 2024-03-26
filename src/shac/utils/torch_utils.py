@@ -11,7 +11,6 @@ import numpy as np
 import gc
 import torch
 import cProfile
-from torchviz import make_dot
 from time import sleep
 
 log_output = ""

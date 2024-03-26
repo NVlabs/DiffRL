@@ -263,17 +263,19 @@ class DFlexEnv:
 
         return self.obs_buf, rew, done, extras
 
-    def reset(self, env_ids=None, grads=False):
+    def reset(self, env_ids=None, grads=False, force_reset=True):
         if grads:
             """
             This function starts collecting a new trajectory from the current states but cuts off the computation graph to the previous states.
             It has to be called every time the algorithm starts an episode and it returns the observation vectors
+
+            Note: force_reset resets all envs and is here for compatibility with rl_games
             """
             self.clear_grad()
             self.obs_buf = self.observation_from_state(self.state)
             return self.obs_buf
 
-        if env_ids is None:
+        if env_ids is None or force_reset:
             # reset all environemnts
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
 
