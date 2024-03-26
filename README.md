@@ -5,7 +5,7 @@ This repository contains the implementation for the paper [Adaptive Horizon Acto
 In this paper, we build on previous work in differentiable simulation policy optimization, to create Adaptive Horizon Actor Critic (AHAC). Our approach deals with gradient error arising from stiff contact by dynamically adapting its model-based horizon to fit one robot gait and avoid excessive contact. This results in a higher performant and easier to use algorithm than its predecessor [Short Horizon Actor Critic (SHAC)](https://short-horizon-actor-critic.github.io/) while also outperofming PPO by 40% across a set of high-dimensional locomotion tasks.
 
 <video width="1280" height="720" loop>
-  <source src="https://adaptive-horizon-actor-critic.github.io/media/all_envs_trimmed.mp" type="video/mp4">
+  <source src="https://adaptive-horizon-actor-critic.github.io/media/all_envs_trimmed.mp4" type="video/mp4">
 </video>
 
 ## Installation
