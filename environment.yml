@@ -1,0 +1,25 @@
+name: diffrl
+channels:
+  - pytorch
+  - defaults
+  - nvidia
+dependencies:
+  - python=3.10
+  - pytorch==1.13.1
+  - pytorch-cuda=11.7
+  - cuda-toolkit=11.7
+  - pandas
+  - matplotlib
+  - seaborn
+  - ipython
+  - pip
+  - pip:
+      - urchin
+      - usd-core
+      - hydra-core
+      - tqdm
+      - wandb
+      - torchopt
+      - black
+      - tensorboardX
+      - rl_games==1.5.*

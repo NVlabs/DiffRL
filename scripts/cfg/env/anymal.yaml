@@ -1,0 +1,52 @@
+name: df_anymal
+config:
+  _target_: dflex.envs.AnymalEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 128
+  stochastic_init: True
+  no_grad: ??? # decided based on algorithm
+  episode_length: 1000
+  MM_caching_frequency: 16
+  early_termination: True
+  nan_state_fix: True
+  termination_height: 0.25
+  action_penalty: -5e-3
+  up_rew_scale: 0.1
+  heading_rew_scale: 1.0
+  heigh_rew_scale: 1.0
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 5e-4
+  max_epochs: 3000
+  save_interval: 500
+  target_critic_alpha: 0.99
+  actor_mlp:
+    units: [400, 200, 100]
+  critic_mlp:
+    units: [400, 200, 100]
+
+ppo:
+  max_epochs: 5000
+  lr: 5e-4
+  minibatch_size: 32768
+  num_actors: 4096
+  horizon_length: 32
+  save_frequency: 500
+  save_best_after: 500
+  actor_mlp:
+    units: [400, 200, 100]
+
+sac:
+  max_epochs: 5000
+  batch_size: 2048
+  num_actors: 64
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
+    units: [512, 256]
+
+svg:
+  num_train_steps: 1e7
+  replay_buffer_capacity: 1e6

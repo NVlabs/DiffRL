@@ -1,0 +1,51 @@
+name: df_ant
+config:
+  _target_: dflex.envs.AntEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 128
+  stochastic_init: True
+  no_grad: ??? # decided based on algorithm
+  episode_length: 1000
+  MM_caching_frequency: 16
+  early_termination: True
+  termination_height: 0.27
+  action_penalty: 0.0
+  joint_vel_obs_scaling: 0.1
+  up_rew_scale: 0.1
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 5e-4
+  max_epochs: 2000
+  save_interval: 400
+  target_critic_alpha: 0.99
+  actor_mlp:
+    units: [400, 200, 100]
+  critic_mlp:
+    units: [400, 200, 100]
+
+ppo:
+  max_epochs: 50000
+  lr: 5e-4
+  minibatch_size: 16384
+  num_actors: 2048
+  horizon_length: 32
+  save_frequency: 500
+  save_best_after: 500
+  actor_mlp:
+    units: [400, 200, 100]
+
+sac:
+  max_epochs: 5000
+  batch_size: 4096
+  num_actors: 128
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
+    units: [128, 64, 32]
+
+# Note SVG doesn't like floats so we use ints
+svg:
+  num_train_steps: 11000000 # 11M
+  replay_buffer_capacity: 1000000

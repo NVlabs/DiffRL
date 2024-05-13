@@ -14,10 +14,12 @@ import cProfile
 
 log_output = ""
 
+
 def log(s):
     print(s)
     global log_output
     log_output = log_output + s + "\n"
+
 
 # short hands
 
@@ -39,7 +41,6 @@ def normalize(v):
 
 
 def skew(v):
-
     return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
 
 
@@ -72,21 +73,27 @@ def quat_from_axis_angle(axis, angle):
 def quat_rotate(q, x):
     x = np.array(x)
     axis = np.array((q[0], q[1], q[2]))
-    return x * (2.0 * q[3] * q[3] - 1.0) + np.cross(axis, x) * q[3] * 2.0 + axis * np.dot(axis, x) * 2.0
+    return (
+        x * (2.0 * q[3] * q[3] - 1.0)
+        + np.cross(axis, x) * q[3] * 2.0
+        + axis * np.dot(axis, x) * 2.0
+    )
 
 
 # multiply two quats
 def quat_multiply(a, b):
-
-    return np.array((a[3] * b[0] + b[3] * a[0] + a[1] * b[2] - b[1] * a[2],
-                     a[3] * b[1] + b[3] * a[1] + a[2] * b[0] - b[2] * a[0],
-                     a[3] * b[2] + b[3] * a[2] + a[0] * b[1] - b[0] * a[1],
-                     a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]))
+    return np.array(
+        (
+            a[3] * b[0] + b[3] * a[0] + a[1] * b[2] - b[1] * a[2],
+            a[3] * b[1] + b[3] * a[1] + a[2] * b[0] - b[2] * a[0],
+            a[3] * b[2] + b[3] * a[2] + a[0] * b[1] - b[0] * a[1],
+            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+        )
+    )
 
 
 # convert to mat33
 def quat_to_matrix(q):
-
     c1 = quat_rotate(q, np.array((1.0, 0.0, 0.0)))
     c2 = quat_rotate(q, np.array((0.0, 1.0, 0.0)))
     c3 = quat_rotate(q, np.array((0.0, 0.0, 1.0)))
@@ -95,7 +102,6 @@ def quat_to_matrix(q):
 
 
 def quat_rpy(roll, pitch, yaw):
-
     cy = math.cos(yaw * 0.5)
     sy = math.sin(yaw * 0.5)
     cr = math.cos(roll * 0.5)
@@ -103,21 +109,19 @@ def quat_rpy(roll, pitch, yaw):
     cp = math.cos(pitch * 0.5)
     sp = math.sin(pitch * 0.5)
 
-    w = (cy * cr * cp + sy * sr * sp)
-    x = (cy * sr * cp - sy * cr * sp)
-    y = (cy * cr * sp + sy * sr * cp)
-    z = (sy * cr * cp - cy * sr * sp)
+    w = cy * cr * cp + sy * sr * sp
+    x = cy * sr * cp - sy * cr * sp
+    y = cy * cr * sp + sy * sr * cp
+    z = sy * cr * cp - cy * sr * sp
 
     return (x, y, z, w)
 
 
 def quat_from_matrix(m):
-
     tr = m[0, 0] + m[1, 1] + m[2, 2]
     h = 0.0
-    
-    if(tr >= 0.0):
 
+    if tr >= 0.0:
         h = math.sqrt(tr + 1.0)
         w = 0.5 * h
         h = 0.5 / h
@@ -127,15 +131,13 @@ def quat_from_matrix(m):
         z = (m[1, 0] - m[0, 1]) * h
 
     else:
+        i = 0
+        if m[1, 1] > m[0, 0]:
+            i = 1
+        if m[2, 2] > m[i, i]:
+            i = 2
 
-        i = 0;
-        if(m[1, 1] > m[0, 0]):
-            i = 1;
-        if(m[2, 2] > m[i, i]):
-            i = 2;
-        
-        if (i == 0):
-
+        if i == 0:
             h = math.sqrt((m[0, 0] - (m[1, 1] + m[2, 2])) + 1.0)
             x = 0.5 * h
             h = 0.5 / h
@@ -143,9 +145,8 @@ def quat_from_matrix(m):
             y = (m[0, 1] + m[1, 0]) * h
             z = (m[2, 0] + m[0, 2]) * h
             w = (m[2, 1] - m[1, 2]) * h
-            
-        elif (i == 1):
 
+        elif i == 1:
             h = sqrtf((m[1, 1] - (m[2, 2] + m[0, 0])) + 1.0)
             y = 0.5 * h
             h = 0.5 / h
@@ -153,9 +154,8 @@ def quat_from_matrix(m):
             z = (m[1, 2] + m[2, 1]) * h
             x = (m[0, 1] + m[1, 0]) * h
             w = (m[0, 2] - m[2, 0]) * h
-        
-        elif (i == 2):
 
+        elif i == 2:
             h = sqrtf((m[2, 2] - (m[0, 0] + m[1, 1])) + 1.0)
             z = 0.5 * h
             h = 0.5 / h
@@ -163,7 +163,6 @@ def quat_from_matrix(m):
             x = (m[2, 0] + m[0, 2]) * h
             y = (m[1, 2] + m[2, 1]) * h
             w = (m[1, 0] - m[0, 1]) * h
-
 
     return normalize(quat(x, y, z, w))
 
@@ -181,16 +180,19 @@ def transform_identity():
 
 # se(3) -> SE(3), Park & Lynch pg. 105, screw in [w, v] normalized form
 def transform_exp(s, angle):
-
     w = np.array(s[0:3])
     v = np.array(s[3:6])
 
-    if (length(w) < 1.0):
+    if length(w) < 1.0:
         r = quat_identity()
     else:
         r = quat_from_axis_angle(w, angle)
 
-    t = v * angle + (1.0 - math.cos(angle)) * np.cross(w, v) + (angle - math.sin(angle)) * np.cross(w, np.cross(w, v))
+    t = (
+        v * angle
+        + (1.0 - math.cos(angle)) * np.cross(w, v)
+        + (angle - math.sin(angle)) * np.cross(w, np.cross(w, v))
+    )
 
     return (t, r)
 
@@ -232,6 +234,7 @@ def transform_expand_list(xforms):
     exp = lambda t: transform_expand(t)
     return list(map(exp, xforms))
 
+
 def transform_inertia(m, I, p, q):
     R = quat_to_matrix(q)
 
@@ -244,7 +247,6 @@ def transform_inertia(m, I, p, q):
 
 # AdT
 def spatial_adjoint(t):
-
     R = quat_to_matrix(t[1])
     w = skew(t[0])
 
@@ -258,7 +260,6 @@ def spatial_adjoint(t):
 
 # (AdT)^-T
 def spatial_adjoint_dual(t):
-
     R = quat_to_matrix(t[1])
     w = skew(t[0])
 
@@ -282,13 +283,11 @@ def transform_wrench(t_ab, f_b):
 
 # transform spatial inertia (6x6) in b frame to a frame
 def transform_spatial_inertia(t_ab, I_b):
-
     t_ba = transform_inverse(t_ab)
 
     # todo: write specialized method
     I_a = np.dot(np.dot(spatial_adjoint(t_ba).T, I_b), spatial_adjoint(t_ba))
     return I_a
-
 
 
 def translate_twist(p_ab, s_b):
@@ -338,7 +337,6 @@ def spatial_matrix():
 
 
 def spatial_matrix_from_inertia(I, m):
-
     G = spatial_matrix()
 
     G[0:3, 0:3] = I
@@ -355,7 +353,6 @@ def spatial_solve(I, b):
 
 
 def rpy2quat(roll, pitch, yaw):
-
     cy = math.cos(yaw * 0.5)
     sy = math.sin(yaw * 0.5)
     cr = math.cos(roll * 0.5)
@@ -375,10 +372,12 @@ def rpy2quat(roll, pitch, yaw):
 def get_body_angular_velocity(v_s):
     return v_s[0:3]
 
+
 # helper to compute velocity of a point p on a body given it's spatial twist v_s
 def get_body_linear_velocity(v_s, p):
     dpdt = v_s[3:6] + torch.cross(v_s[0:3], p)
     return dpdt
+
 
 # helper to build a body twist given the angular and linear velocity of
 # the center of mass specified in the world frame, returns the body
@@ -387,11 +386,11 @@ def get_body_twist(w_m, v_m, p_m):
     lin = v_m + torch.cross(p_m, w_m)
     return (*w_m, *lin)
 
+
 # timer utils
 
 
 class ScopedTimer:
-
     indent = -1
 
     enabled = True
@@ -402,24 +401,21 @@ class ScopedTimer:
         self.detailed = detailed
 
     def __enter__(self):
-
-        if (self.active):
+        if self.active:
             self.start = timeit.default_timer()
             ScopedTimer.indent += 1
 
-            if (self.detailed):
+            if self.detailed:
                 self.cp = cProfile.Profile()
                 self.cp.clear()
                 self.cp.enable()
 
-
     def __exit__(self, exc_type, exc_value, traceback):
-
-        if (self.detailed):
+        if self.detailed:
             self.cp.disable()
-            self.cp.print_stats(sort='tottime')
+            self.cp.print_stats(sort="tottime")
 
-        if (self.active):
+        if self.active:
             elapsed = (timeit.default_timer() - self.start) * 1000.0
 
             indent = ""
@@ -446,17 +442,16 @@ class ScopedTimer:
 # winding is such that first tri can be reconstructed as {v0, v1, o0}, and second tri as { v1, v0, o1 }
 class MeshEdge:
     def __init__(self, v0, v1, o0, o1, f0, f1):
-        self.v0 = v0         # vertex 0
-        self.v1 = v1         # vertex 1
-        self.o0 = o0         # opposite vertex 1
-        self.o1 = o1         # opposite vertex 2
-        self.f0 = f0         # index of tri1
-        self.f1 = f1         # index of tri2
+        self.v0 = v0  # vertex 0
+        self.v1 = v1  # vertex 1
+        self.o0 = o0  # opposite vertex 1
+        self.o1 = o1  # opposite vertex 2
+        self.f0 = f0  # index of tri1
+        self.f1 = f1  # index of tri2
 
 
 class MeshAdjacency:
     def __init__(self, indices, num_tris):
-
         # map edges (v0, v1) to faces (f0, f1)
         self.edges = {}
         self.indices = indices
@@ -467,15 +462,13 @@ class MeshAdjacency:
             self.add_edge(tri[2], tri[0], tri[1], index)
 
     def add_edge(self, i0, i1, o, f):  # index1, index2, index3, index of triangle
-
         key = (min(i0, i1), max(i0, i1))
         edge = None
 
         if key in self.edges:
-
             edge = self.edges[key]
 
-            if (edge.f1 != -1):
+            if edge.f1 != -1:
                 print("Detected non-manifold edge")
                 return
             else:
@@ -492,20 +485,18 @@ class MeshAdjacency:
         pass
 
 
-
-
 def mem_report():
-    '''Report the memory usage of the tensor.storage in pytorch
-    Both on CPUs and GPUs are reported'''
+    """Report the memory usage of the tensor.storage in pytorch
+    Both on CPUs and GPUs are reported"""
 
     def _mem_report(tensors, mem_type):
-        '''Print the selected tensors of type
+        """Print the selected tensors of type
         There are two major storage types in our major concern:
             - GPU: tensors transferred to CUDA devices
             - CPU: tensors remaining on the system memory (usually unimportant)
         Args:
             - tensors: the tensors of specified type
-            - mem_type: 'CPU' or 'GPU' in current implementation '''
+            - mem_type: 'CPU' or 'GPU' in current implementation"""
         total_numel = 0
         total_mem = 0
         visited_data = []
@@ -521,7 +512,7 @@ def mem_report():
             numel = tensor.storage().size()
             total_numel += numel
             element_size = tensor.storage().element_size()
-            mem = numel*element_size /1024/1024 # 32bit=4Byte, MByte
+            mem = numel * element_size / 1024 / 1024  # 32bit=4Byte, MByte
             total_mem += mem
             element_type = type(tensor).__name__
             size = tuple(tensor.size())
@@ -530,16 +521,19 @@ def mem_report():
             #     element_type,
             #     size,
             #     mem) )
-        print('Type: %s Total Tensors: %d \tUsed Memory Space: %.2f MBytes' % (mem_type, total_numel, total_mem) )
+        print(
+            "Type: %s Total Tensors: %d \tUsed Memory Space: %.2f MBytes"
+            % (mem_type, total_numel, total_mem)
+        )
 
     gc.collect()
 
     LEN = 65
     objects = gc.get_objects()
-    #print('%s\t%s\t\t\t%s' %('Element type', 'Size', 'Used MEM(MBytes)') )
+    # print('%s\t%s\t\t\t%s' %('Element type', 'Size', 'Used MEM(MBytes)') )
     tensors = [obj for obj in objects if torch.is_tensor(obj)]
     cuda_tensors = [t for t in tensors if t.is_cuda]
     host_tensors = [t for t in tensors if not t.is_cuda]
-    _mem_report(cuda_tensors, 'GPU')
-    _mem_report(host_tensors, 'CPU')
-    print('='*LEN)
+    _mem_report(cuda_tensors, "GPU")
+    _mem_report(host_tensors, "CPU")
+    print("=" * LEN)

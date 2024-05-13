@@ -1,0 +1,135 @@
+name: svg
+num_train_steps: ${resolve_child:10000000,${env.svg},num_train_steps}
+replay_buffer_capacity: ${resolve_child:1e6,${env.svg},replay_buffer_capacity}
+num_seed_steps: 10240
+eval_freq: 10000 # Over-ridden by env
+num_eval_episodes: ${env.player.games_num}
+fixed_eval: false
+steps_num: 32
+
+pixels: false
+normalize_obs: true
+
+device: ${general.device}
+action_repeat: 0
+
+log_freq: 10000
+log_save_tb: ${general.run_wandb}
+score_keys: [] # I think this is for extra logging but unsrue
+
+save_video: false
+delete_replay_at_end: false # TODO need to fix
+
+save_freq: 100000
+save_best_eval: true
+save_zfill: 7
+
+seed: ${general.seed}
+
+# For debugging:
+num_initial_states: null # Use a subset of initial states
+max_episode_steps: ${env.config.episode_length}
+
+model_free_hidden_dim: 128
+model_free_hidden_depth: 2
+obs_dim: 11 # TODO get in code
+action_dim: 3 # TODO get in code
+action_range: [-1.0, 1.0] # TODO get in code
+
+agent:
+  _target_: svg.agent.SACSVGAgent
+  env_name: ${env.name}
+  obs_dim: ${alg.obs_dim}
+  action_dim: ${alg.action_dim}
+  action_range: ${alg.action_range}
+  device: ${general.device}
+  dx_cfg: ${alg.dx}
+  num_train_steps: ${alg.num_train_steps}
+
+  temp_cfg: ${alg.learn_temp}
+  # temp_cfg: null # auto-set to best for env+agent if null
+
+  actor_cfg: ${alg.normal_actor}
+  actor_lr: 1e-4
+  actor_betas: [0.9, 0.999]
+  actor_update_freq: 1
+  actor_mve: true
+  actor_detach_rho: false
+  actor_dx_threshold: null
+
+  critic_cfg: ${alg.double_q_critic}
+  critic_lr: 1e-4
+  critic_tau: 0.005
+  critic_target_update_freq: 1
+  critic_target_mve: false
+  full_target_mve: False
+
+  discount: 0.99
+  seq_batch_size: 512
+  step_batch_size: 1024
+  horizon: 3
+  seq_train_length: ${alg.agent.horizon}
+  update_freq: 1
+
+  model_update_freq: 1
+  model_update_repeat: 4
+
+  model_free_update_repeat: 5
+
+  rew_hidden_dim: 128
+  rew_hidden_depth: 2
+  rew_lr: 1e-3
+
+  done_hidden_dim: 128
+  done_hidden_depth: 2
+  done_lr: 1e-3
+  done_ctrl_accum: true
+
+  warmup_steps: 0 # Auto-set if null
+
+  det_suffix: 0.0
+
+dx:
+  _target_: svg.dx.SeqDx
+  env_name: ${env.name}
+  obs_dim: ${alg.obs_dim}
+  action_dim: ${alg.action_dim}
+  action_range: ${alg.action_range}
+  horizon: ${alg.agent.horizon}
+  device: ${general.device}
+  detach_xt: true
+  xu_enc_hidden_dim: 128
+  xu_enc_hidden_depth: 2
+  x_dec_hidden_dim: 128
+  x_dec_hidden_depth: 0
+  clip_grad_norm: 1.0
+  rec_type: GRU
+  rec_latent_dim: 128
+  rec_num_layers: 2
+  lr: 1e-4
+
+normal_actor:
+  _target_: svg.actor.Actor
+  obs_dim: ${alg.obs_dim}
+  action_dim: ${alg.action_dim}
+  hidden_dim: ${alg.model_free_hidden_dim}
+  hidden_depth: ${alg.model_free_hidden_depth}
+  log_std_bounds: [-5, 2]
+
+double_q_critic:
+  _target_: svg.critic.DoubleQCritic
+  obs_dim: ${alg.obs_dim}
+  action_dim: ${alg.action_dim}
+  hidden_dim: ${alg.model_free_hidden_dim}
+  hidden_depth: ${alg.model_free_hidden_depth}
+
+learn_temp:
+  _target_: svg.temp.LearnTemp
+  init_temp: 0.1
+  max_steps: ${alg.num_train_steps}
+  init_targ_entr: -${alg.action_dim}
+  final_targ_entr: -${alg.action_dim}
+  entr_decay_factor: 0.
+  only_decrease_alpha: false
+  lr: 1e-4
+  device: ${general.device}

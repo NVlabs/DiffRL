@@ -1,0 +1,33 @@
+name: df_cheetah
+
+config:
+  _target_: dflex.envs.CheetahEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 1024
+  seed: ${general.seed}
+  episode_length: 1000
+  no_grad: ??? # decided based on algorithm
+  stochastic_init: True
+  MM_caching_frequency: 16
+  early_termination: True
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 2e-3
+  max_epochs: 500
+  betas: [0.7, 0.95]
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+
+ppo:
+  actor_mlp:
+    units: [64, 64]
+  max_epochs: 150
+  minibatch_size: 1920
+  save_interval: 100
+  save_best_after: 50
+  num_actors: 1024
+  steps_num: 240

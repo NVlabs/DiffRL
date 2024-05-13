@@ -7,6 +7,6 @@
 
 import os
 
-no_grad = False         # disable adjoint tracking
-check_grad = False      # will perform numeric gradient checking after each launch
-verify_fp = False       # verify inputs and outputs are finite after each launch
+no_grad = False  # disable adjoint tracking
+check_grad = False  # will perform numeric gradient checking after each launch
+verify_fp = False  # verify inputs and outputs are finite after each launch

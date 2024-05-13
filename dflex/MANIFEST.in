@@ -1,0 +1,11 @@
+include dflex/*.h
+include dflex/envs/assets
+include dflex/envs/assets/*.xml
+include dflex/envs/assets/*.urdf
+include dflex/envs/assets/*.stl
+include dflex/envs/assets/anymal_c/meshes/*.dae
+include dflex/envs/assets/anymal_c/meshes/*.jpg
+include dflex/envs/assets/anymal_c/urdf/*.urdf
+include dflex/envs/assets/snu/*.xml
+include dflex/envs/assets/snu/obj/*.obj
+include dflex/envs/assets/snu/obj/*.usd

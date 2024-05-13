@@ -1,0 +1,75 @@
+name: ppo
+
+params:
+  algo:
+    name: a2c_continuous
+
+  model:
+    name: continuous_a2c_logstd
+
+  network:
+    name: actor_critic
+    separate: False
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0
+        fixed_sigma: True
+    mlp:
+      units: ${resolve_child:[64, 64],${env.ppo.actor_mlp},units}
+      activation: elu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+  load_checkpoint: False
+  load_path: nn/${env.name}_ppo.pth
+
+  config:
+    name: ${env.name}_ppo
+    env_name: ${env.name}
+    multi_gpu: False
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    reward_shaper:
+      scale_value: 0.01
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: ${resolve_child:3e-4,${env.ppo},lr}
+    lr_schedule: adaptive
+    lr_threshold: 0.008
+    kl_threshold: 0.008
+    score_to_win: 2000000000 # never stop training
+    max_epochs: ${resolve_child:5000,${env.ppo},max_epochs}
+    save_best_after: ${resolve_child:100,${env.ppo},save_best_after}
+    save_frequency: ${resolve_child:400,${env.ppo},save_frequency}
+    grad_norm: 1.0
+    entropy_coef: 0.0
+    truncate_grads: True
+    e_clip: 0.2
+    num_actors: ${resolve_child:2048,${env.ppo},num_actors}
+    horizon_length: ${resolve_child:32,${env.ppo},horizon_length}
+    minibatch_size: ${resolve_child:16384,${env.ppo},minibatch_size}
+    mini_epochs: 5
+    critic_coef: 4
+    clip_value: True
+    seq_len: 4
+    bounds_loss_coef: 0.0001
+
+    player:
+      games_num: ${resolve_child:24,${env.player},games_num}
+      num_actors: ${resolve_child:3,${env.player},num_actors}
+      determenistic: True
+      print_stats: True

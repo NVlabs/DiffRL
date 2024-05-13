@@ -11,7 +11,8 @@ import time
 # include parent path
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import dflex as df
 
@@ -19,18 +20,16 @@ from pxr import Usd, UsdGeom, Gf
 
 
 class Contact:
-
-    sim_duration = 2.0       # seconds
+    sim_duration = 2.0  # seconds
     sim_substeps = 16
     sim_dt = (1.0 / 60.0) / sim_substeps
     sim_steps = int(sim_duration / sim_dt)
     sim_time = 0.0
 
     train_iters = 16
-    train_rate = 0.1         #1.0/(sim_dt*sim_dt)
+    train_rate = 0.1  # 1.0/(sim_dt*sim_dt)
 
-    def __init__(self, adapter='cpu'):
-
+    def __init__(self, adapter="cpu"):
         builder = df.sim.ModelBuilder()
 
         builder.add_particle((0.0, 1.5, 0.0), (0.0, 0.0, 0.0), 0.25)
@@ -39,14 +38,14 @@ class Contact:
         self.target_index = 0
 
         self.model = builder.finalize(adapter)
-        self.model.contact_ke = 1.e+3
+        self.model.contact_ke = 1.0e3
         self.model.contact_kf = 10.0
         self.model.contact_kd = 10.0
         self.model.contact_mu = 0.25
 
         self.model.particle_qd.requires_grad = True
 
-        #-----------------------
+        # -----------------------
         # set up Usd renderer
 
         self.stage = Usd.Stage.CreateNew("outputs/contact.usda")
@@ -61,14 +60,12 @@ class Contact:
         self.integrator = df.sim.SemiImplicitIntegrator()
 
     def loss(self):
-
-        #-----------------------
+        # -----------------------
         # run simulation
 
         self.state = self.model.state()
 
         for i in range(0, self.sim_steps):
-
             self.state = self.integrator.forward(self.model, self.state, self.sim_dt)
 
             if (i % self.sim_substeps) == 0:
@@ -82,19 +79,16 @@ class Contact:
         return loss
 
     def run(self):
-
         l = self.loss()
         self.stage.Save()
 
-    def train(self, mode='gd'):
-
+    def train(self, mode="gd"):
         # param to train
         param = self.model.particle_qd
 
         # Gradient Descent
-        if (mode == 'gd'):
+        if mode == "gd":
             for i in range(self.train_iters):
-
                 l = self.loss()
                 l.backward()
 
@@ -108,9 +102,14 @@ class Contact:
                     param.grad.zero_()
 
         # L-BFGS
-        if (mode == 'lbfgs'):
-
-            optimizer = torch.optim.LBFGS([param], 1.0, tolerance_grad=1.e-5, history_size=4, line_search_fn="strong_wolfe")
+        if mode == "lbfgs":
+            optimizer = torch.optim.LBFGS(
+                [param],
+                1.0,
+                tolerance_grad=1.0e-5,
+                history_size=4,
+                line_search_fn="strong_wolfe",
+            )
 
             def closure():
                 optimizer.zero_grad()
@@ -125,8 +124,7 @@ class Contact:
                 optimizer.step(closure)
 
         # SGD
-        if (mode == 'sgd'):
-
+        if mode == "sgd":
             optimizer = torch.optim.SGD([param], lr=self.train_rate, momentum=0.8)
 
             for i in range(self.train_iters):
@@ -143,8 +141,7 @@ class Contact:
         self.stage.Save()
 
 
-#---------
+# ---------
 
-contact = Contact(adapter='cpu')
-contact.train('lbfgs')
-
+contact = Contact(adapter="cpu")
+contact.train("lbfgs")

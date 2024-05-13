@@ -1,0 +1,55 @@
+name: df_snuhumanoid
+env_name: SNUHumanoidEnv
+
+config:
+  _target_: dflex.envs.SNUHumanoidEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 64
+  no_grad: ??? # decided based on algorithm
+  stochastic_init: True
+  episode_length: 1000
+  MM_caching_frequency: 8
+  termination_height: 0.46
+  termination_tolerance: 0.05
+  height_rew_scale: 4.0
+  up_rew_scale: 0.1 # 10 produces better looking behaviour
+  heading_rew_scale: 1.0
+  action_penalty: -1e-3
+  joint_vel_obs_scaling: 0.1
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 5e-4
+  max_epochs: 5000
+  save_interval: 500
+  target_critic_alpha: 0.99
+  actor_mlp:
+    units: [400, 200, 100]
+  critic_mlp:
+    units: [400, 200, 100]
+
+ppo:
+  max_epochs: 15000
+  lr: 5e-4
+  minibatch_size: 16384
+  num_actors: 2048
+  horizon_length: 32
+  save_frequency: 500
+  save_best_after: 500
+  actor_mlp:
+    units: [400, 200, 100]
+
+sac:
+  max_epochs: 10000
+  batch_size: 8192
+  num_actors: 256
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
+    units: [512, 256]
+
+# Note SVG doesn't like floats so we use ints
+svg:
+  num_train_steps: 11000000 # 11M
+  replay_buffer_capacity: 1000000

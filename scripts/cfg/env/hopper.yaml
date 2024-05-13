@@ -1,0 +1,68 @@
+name: df_hopper
+env_name: HopperEnv
+
+config:
+  _target_: dflex.envs.HopperEnv
+  render: ${general.render}
+  device: ${general.device}
+  num_envs: 1024
+  episode_length: 1000
+  no_grad: ??? # decided based on algorithm
+  stochastic_init: True
+  MM_caching_frequency: 4
+  early_termination: True
+  termination_height: -0.45
+  termination_angle: 0.524 # pi/6
+  termination_height_tolerance: 0.15
+  termination_angle_tolerance: 0.05
+  height_rew_scale: 1.0
+  action_penalty: -1e-1
+
+
+shac:
+  actor_lr: 2e-3
+  critic_lr: 5e-4
+  max_epochs: 500
+  save_interval: 100
+  target_critic_alpha: 0.99
+  actor_mlp:
+    units: [400, 200, 100]
+  critic_mlp:
+    units: [400, 200, 100]
+
+ahac:
+  actor_lr: 2e-3
+  critic_lr: 4e-3
+  max_epochs: 500
+  jacobian_norm: 1.0
+  grad_norm: null
+  actor_mlp:
+    units: [128, 64, 32]
+  critic_mlp:
+    units: [64, 64]
+  save_interval: 100
+
+ppo:
+  max_epochs: 500
+  lr: 5e-4
+  minibatch_size: 32768
+  num_actors: 4096
+  horizon_length: 32
+  save_frequency: 50
+  save_best_after: 50
+  actor_mlp:
+    units: [400, 200, 100]
+
+sac:
+  max_epochs: 500
+  batch_size: 2048
+  num_actors: 64
+  save_frequency: 500
+  save_best_after: 500
+  actor_critic_mlp:
+    units: [128, 64, 32]
+
+# Note SVG doesn't like floats so we use ints
+svg:
+  num_train_steps: 11000000 # 11M
+  replay_buffer_capacity: 1000000

@@ -12,7 +12,8 @@ import time
 # include parent path
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import dflex as df
 
@@ -20,8 +21,7 @@ from pxr import Usd, UsdGeom, Gf
 
 
 class Walker:
-
-    sim_duration = 5.0       # seconds
+    sim_duration = 5.0  # seconds
     sim_substeps = 16
     sim_dt = (1.0 / 60.0) / sim_substeps
     sim_steps = int(sim_duration / sim_dt)
@@ -32,8 +32,7 @@ class Walker:
     train_iters = 50
     train_rate = 0.0001
 
-    def __init__(self, mode="walker", adapter='cpu'):
-
+    def __init__(self, mode="walker", adapter="cpu"):
         self.phase_count = 8
         self.phase_step = math.pi / self.phase_count * 2.0
         self.phase_freq = 20.0
@@ -68,7 +67,7 @@ class Walker:
         self.edge_ke = 0.0
         self.edge_kd = 0.0
 
-        self.model.contact_ke = 1.e+4
+        self.model.contact_ke = 1.0e4
         self.model.contact_kd = 1000.0
         self.model.contact_kf = 1000.0
         self.model.contact_mu = 0.5
@@ -76,12 +75,15 @@ class Walker:
         self.model.particle_radius = 0.01
 
         # one fully connected layer + tanh activation
-        self.network = torch.nn.Sequential(torch.nn.Linear(self.phase_count, self.model.tri_count, bias=False), torch.nn.Tanh()).to(adapter)
+        self.network = torch.nn.Sequential(
+            torch.nn.Linear(self.phase_count, self.model.tri_count, bias=False),
+            torch.nn.Tanh(),
+        ).to(adapter)
 
         self.activation_strength = 0.2
         self.activation_penalty = 0.1
 
-        #-----------------------
+        # -----------------------
         # set up Usd renderer
 
         self.stage = Usd.Stage.CreateNew("outputs/walker.usd")
@@ -94,8 +96,7 @@ class Walker:
         self.integrator = df.sim.SemiImplicitIntegrator()
 
     def loss(self, render=True):
-
-        #-----------------------
+        # -----------------------
         # run simulation
         self.sim_time = 0.0
 
@@ -108,14 +109,20 @@ class Walker:
 
             # build sinusoidal phase inputs
             for p in range(self.phase_count):
-                phases[p] = math.cos(4.0*self.sim_time*math.pi/(2.0*self.phase_count)*(2.0*p + 1.0))     #self.phase_freq*self.sim_time + p * self.phase_step)
+                phases[p] = math.cos(
+                    4.0
+                    * self.sim_time
+                    * math.pi
+                    / (2.0 * self.phase_count)
+                    * (2.0 * p + 1.0)
+                )  # self.phase_freq*self.sim_time + p * self.phase_step)
 
             self.model.tri_activations = self.network(phases) * self.activation_strength
             self.state = self.integrator.forward(self.model, self.state, self.sim_dt)
 
             self.sim_time += self.sim_dt
 
-            if (render and (i % self.sim_substeps == 0)):
+            if render and (i % self.sim_substeps == 0):
                 self.render_time += self.sim_dt * self.sim_substeps
                 self.renderer.update(self.state, self.render_time)
 
@@ -123,17 +130,19 @@ class Walker:
             com_vel = torch.mean(self.state.particle_qd, 0)
 
             # use integral of velocity over course of the run
-            loss = loss - com_vel[0] + torch.norm(self.model.tri_activations) * self.activation_penalty
+            loss = (
+                loss
+                - com_vel[0]
+                + torch.norm(self.model.tri_activations) * self.activation_penalty
+            )
 
         return loss
 
     def run(self):
-
         l = self.loss()
         self.stage.Save()
 
-    def train(self, mode='gd'):
-
+    def train(self, mode="gd"):
         # param to train
         self.step_count = 0
         render_freq = 1
@@ -141,12 +150,11 @@ class Walker:
         optimizer = None
 
         def closure():
-
             optimizer.zero_grad()
 
             # render every N steps
             render = False
-            if ((self.step_count % render_freq) == 0):
+            if (self.step_count % render_freq) == 0:
                 render = True
 
             l = self.loss(render)
@@ -156,35 +164,42 @@ class Walker:
             self.step_count += 1
 
             try:
-                if (render):
+                if render:
                     self.stage.Save()
             except:
                 print("USD save error")
 
             return l
 
-        if (mode == 'gd'):
-
+        if mode == "gd":
             # simple Gradient Descent
             for i in range(self.train_iters):
-
                 closure()
 
                 with torch.no_grad():
                     param -= self.train_rate * param.grad
         else:
-
             # L-BFGS
-            if (mode == 'lbfgs'):
-                optimizer = torch.optim.LBFGS(self.network.parameters(), lr=0.1, tolerance_grad=1.e-5, tolerance_change=0.01, line_search_fn="strong_wolfe")
+            if mode == "lbfgs":
+                optimizer = torch.optim.LBFGS(
+                    self.network.parameters(),
+                    lr=0.1,
+                    tolerance_grad=1.0e-5,
+                    tolerance_change=0.01,
+                    line_search_fn="strong_wolfe",
+                )
 
             # Adam
-            if (mode == 'adam'):
-                optimizer = torch.optim.Adam(self.network.parameters(), lr=self.train_rate)
+            if mode == "adam":
+                optimizer = torch.optim.Adam(
+                    self.network.parameters(), lr=self.train_rate
+                )
 
             # SGD
-            if (mode == 'sgd'):
-                optimizer = torch.optim.SGD(self.network.parameters(), lr=self.train_rate, momentum=0.25)
+            if mode == "sgd":
+                optimizer = torch.optim.SGD(
+                    self.network.parameters(), lr=self.train_rate, momentum=0.25
+                )
 
             # train
             for i in range(self.train_iters):
@@ -192,7 +207,7 @@ class Walker:
 
             # final save
             try:
-                if (render):
+                if render:
                     self.stage.Save()
             except:
                 print("USD save error")
@@ -205,8 +220,8 @@ class Walker:
         self.network.eval()
 
 
-#---------
+# ---------
 
-walker = Walker(adapter='cpu')
-walker.train('lbfgs')
-#walker.run()
+walker = Walker(adapter="cpu")
+walker.train("lbfgs")
+# walker.run()

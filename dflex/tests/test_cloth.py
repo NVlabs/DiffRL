@@ -12,7 +12,8 @@ import time
 # include parent path
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import dflex as df
 
@@ -23,12 +24,13 @@ df.ScopedTimer.enabled = True
 
 
 class Cloth:
-
-    sim_duration = 5.0                           # seconds
+    sim_duration = 5.0  # seconds
     sim_substeps = 16
-    sim_dt = (1.0 / 60.0) / sim_substeps         # 60 frames per second, 16 updates between frames,
-                                                 # sim_steps = int(sim_duration/sim_dt)
-    sim_steps = int(sim_duration/sim_dt)
+    sim_dt = (
+        1.0 / 60.0
+    ) / sim_substeps  # 60 frames per second, 16 updates between frames,
+    # sim_steps = int(sim_duration/sim_dt)
+    sim_steps = int(sim_duration / sim_dt)
     sim_time = 0.0
 
     render_time = 0.0
@@ -38,27 +40,36 @@ class Cloth:
 
     phase_count = 4
 
-    def __init__(self, dim=20, mode="cloth", adapter='cpu'):
-
+    def __init__(self, dim=20, mode="cloth", adapter="cpu"):
         torch.manual_seed(42)
 
         height = 2.5
 
         builder = df.sim.ModelBuilder()
-        builder.add_cloth_grid(pos=(0.0, height, 0.0),
-                               rot=df.quat_from_axis_angle((1.0, 0.0, 0.0), math.pi * 1.04),
-                               vel=(0.0, 0.0, 0.0),
-                               dim_x=dim,
-                               dim_y=dim,
-                               cell_x=0.2,
-                               cell_y=0.2,
-                               mass=400 / (dim**2))                                          #, fix_left=True, fix_right=True, fix_top=True, fix_bottom=True)
+        builder.add_cloth_grid(
+            pos=(0.0, height, 0.0),
+            rot=df.quat_from_axis_angle((1.0, 0.0, 0.0), math.pi * 1.04),
+            vel=(0.0, 0.0, 0.0),
+            dim_x=dim,
+            dim_y=dim,
+            cell_x=0.2,
+            cell_y=0.2,
+            mass=400 / (dim**2),
+        )  # , fix_left=True, fix_right=True, fix_top=True, fix_bottom=True)
 
         attach0 = 0
         attach1 = 20
 
-        anchor0 = builder.add_particle(pos=builder.particle_q[attach0] - (1.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), mass=0.0)
-        anchor1 = builder.add_particle(pos=builder.particle_q[attach1] + (1.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), mass=0.0)
+        anchor0 = builder.add_particle(
+            pos=builder.particle_q[attach0] - (1.0, 0.0, 0.0),
+            vel=(0.0, 0.0, 0.0),
+            mass=0.0,
+        )
+        anchor1 = builder.add_particle(
+            pos=builder.particle_q[attach1] + (1.0, 0.0, 0.0),
+            vel=(0.0, 0.0, 0.0),
+            mass=0.0,
+        )
 
         builder.add_spring(anchor0, attach0, 10000.0, 1000.0, 0)
         builder.add_spring(anchor1, attach1, 10000.0, 1000.0, 0)
@@ -68,7 +79,7 @@ class Cloth:
         self.model.tri_ka = 10000.0
         self.model.tri_kd = 100.0
 
-        self.model.contact_ke = 1.e+4
+        self.model.contact_ke = 1.0e4
         self.model.contact_kd = 1000.0
         self.model.contact_kf = 1000.0
         self.model.contact_mu = 0.5
@@ -80,7 +91,7 @@ class Cloth:
         # set optimization targets
         self.model.spring_rest_length.requires_grad_()
 
-        #-----------------------
+        # -----------------------
         # set up Usd renderer
 
         self.stage = Usd.Stage.CreateNew("outputs/cloth.usd")
@@ -90,11 +101,10 @@ class Cloth:
         self.renderer.draw_springs = True
         self.renderer.draw_shapes = True
 
-        #self.integrator = df.sim.SemiImplicitIntegrator()
+        # self.integrator = df.sim.SemiImplicitIntegrator()
         self.integrator = df.sim.XPBDIntegrator()
 
     def loss(self, render=True):
-
         # reset state
         self.sim_time = 0.0
         self.state = self.model.state()
@@ -105,16 +115,19 @@ class Cloth:
             # run simulation
             for i in range(0, self.sim_steps):
                 with df.ScopedTimer("simulate", False):
-                    self.state = self.integrator.forward(self.model, self.state, self.sim_dt)
+                    self.state = self.integrator.forward(
+                        self.model, self.state, self.sim_dt
+                    )
 
                 with df.ScopedTimer("render", False):
-                    if (render and (i % self.sim_substeps == 0)):
+                    if render and (i % self.sim_substeps == 0):
                         self.render_time += self.sim_dt * self.sim_substeps
                         self.renderer.update(self.state, self.render_time)
 
                 if (self.state.particle_q != self.state.particle_q).sum() != 0:
                     print("NaN found in state")
                     import pdb
+
                     pdb.set_trace()
 
                 self.sim_time += self.sim_dt
@@ -129,12 +142,10 @@ class Cloth:
             return loss
 
     def run(self):
-
         l = self.loss()
         self.stage.Save()
 
-    def train(self, mode='gd'):
-
+    def train(self, mode="gd"):
         # param to train
         self.step_count = 0
         self.render_steps = 1
@@ -144,7 +155,7 @@ class Cloth:
         def closure():
             # render every N steps
             render = False
-            if ((self.step_count % self.render_steps) == 0):
+            if (self.step_count % self.render_steps) == 0:
                 render = True
 
             # with torch.autograd.detect_anomaly():
@@ -155,7 +166,7 @@ class Cloth:
                 l.backward()
 
             with df.ScopedTimer("save", False):
-                if (render):
+                if render:
                     self.stage.Save()
 
             print(str(self.step_count) + ": " + str(l))
@@ -164,7 +175,7 @@ class Cloth:
             return l
 
         with df.ScopedTimer("step"):
-            if (mode == 'gd'):
+            if mode == "gd":
                 param = self.model.spring_rest_length
 
                 # simple Gradient Descent
@@ -176,22 +187,29 @@ class Cloth:
 
                     param.grad.data.zero_()
             else:
-
                 # L-BFGS
-                if (mode == 'lbfgs'):
-                    optimizer = torch.optim.LBFGS([self.model.spring_rest_length],
-                                                  lr=0.01,
-                                                  tolerance_grad=1.e-5,
-                                                  tolerance_change=0.01,
-                                                  line_search_fn="strong_wolfe")
+                if mode == "lbfgs":
+                    optimizer = torch.optim.LBFGS(
+                        [self.model.spring_rest_length],
+                        lr=0.01,
+                        tolerance_grad=1.0e-5,
+                        tolerance_change=0.01,
+                        line_search_fn="strong_wolfe",
+                    )
 
                 # Adam
-                if (mode == 'adam'):
-                    optimizer = torch.optim.Adam([self.model.spring_rest_length], lr=self.train_rate * 4.0)
+                if mode == "adam":
+                    optimizer = torch.optim.Adam(
+                        [self.model.spring_rest_length], lr=self.train_rate * 4.0
+                    )
 
                 # SGD
-                if (mode == 'sgd'):
-                    optimizer = torch.optim.SGD([self.model.spring_rest_length], lr=self.train_rate * 0.01, momentum=0.8)
+                if mode == "sgd":
+                    optimizer = torch.optim.SGD(
+                        [self.model.spring_rest_length],
+                        lr=self.train_rate * 0.01,
+                        momentum=0.8,
+                    )
 
                 # train
                 for i in range(self.train_iters):
@@ -206,11 +224,11 @@ class Cloth:
         self.network.eval()
 
 
-#---------
+# ---------
 
-cloth = Cloth(adapter='cuda')
+cloth = Cloth(adapter="cuda")
 cloth.run()
-#cloth.train('adam')
+# cloth.train('adam')
 
 # for dim in range(20, 400, 20):
 #     cloth = Cloth(dim=dim)
